@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "SPX OnHold Loader",
+  "version": "0.1.0",
+  "description": "Carregador modular do SPX OnHold.",
+  "permissions": ["storage", "userScripts"],
+  "host_permissions": [
+    "https://spx.shopee.com.br/*",
+    "https://raw.githubusercontent.com/*"
+  ],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html"}
+}
