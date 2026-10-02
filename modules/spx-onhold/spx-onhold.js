@@ -94,25 +94,36 @@
   }
 
   function parseDriver(text) {
-    const raw = String(text || '').trim();
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
     const m = raw.match(/\[(\d+)\]\s*(.+)/);
     return m ? { id: m[1], name: m[2].trim() } : { id: '', name: raw };
   }
 
-  function findResultForTracking(tracking) {
+  function findAssignmentResult() {
     const tables = [...document.querySelectorAll('table')];
     for (const table of tables) {
       const headers = getHeaders(table);
       const driverIndex = headers.findIndex(h => /motorista|driver/.test(h));
-      for (const row of table.querySelectorAll('tbody tr')) {
-        if (!row.innerText.includes(tracking)) continue;
-        const cells = [...row.querySelectorAll('td')];
-        const driverText = driverIndex >= 0
-          ? cells[driverIndex]?.innerText
-          : row.innerText.match(/\[\d+\][^\n]+/)?.[0];
-        const driver = parseDriver(driverText);
-        return { tracking, driver, row };
-      }
+      const actionIndex = headers.findIndex(h => /ação|acao|action/.test(h));
+      if (driverIndex < 0 || actionIndex < 0) continue;
+
+      const rows = [...table.querySelectorAll('tbody tr')]
+        .filter(row => row.offsetParent !== null && row.querySelectorAll('td').length > 0);
+
+      if (!rows.length) continue;
+
+      const row = rows[0];
+      const cells = [...row.querySelectorAll('td')];
+      const driver = parseDriver(cells[driverIndex]?.innerText || '');
+      const link = cells[actionIndex]?.querySelector('a');
+      const assignmentId = (row.innerText.match(/AT[A-Z0-9]+/i) || [])[0] || '';
+
+      return {
+        tracking: lastTracking,
+        driver,
+        assignmentId,
+        detailHref: link?.href || ''
+      };
     }
     return null;
   }
@@ -138,33 +149,66 @@
       <div style="font-size:18px;margin-top:10px"><b>Em rota:</b> —</div>`;
   }
 
+  function looksLikeTracking(value) {
+    return /^BR[A-Z0-9]{8,}$/i.test(String(value || '').trim());
+  }
+
   function detectTrackingInput() {
     const inputs = [...document.querySelectorAll('input')];
-    return inputs.find(input => {
-      const text = `${input.placeholder || ''} ${input.getAttribute('aria-label') || ''}`.toLowerCase();
-      return /rastreamento|tracking|slps/.test(text);
+
+    const byValue = inputs.find(input => looksLikeTracking(input.value));
+    if (byValue) return byValue;
+
+    const byMeta = inputs.find(input => {
+      const own = `${input.placeholder || ''} ${input.getAttribute('aria-label') || ''} ${input.name || ''}`.toLowerCase();
+      if (/rastreamento|tracking|slps/.test(own)) return true;
+
+      let node = input.parentElement;
+      for (let i = 0; node && i < 4; i++, node = node.parentElement) {
+        const text = (node.innerText || '').toLowerCase();
+        if (/slps.*rastreamento|rastreamento|tracking/.test(text)) return true;
+      }
+      return false;
     });
+
+    return byMeta || null;
+  }
+
+  function scheduleRead(delay = 350) {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      const result = findAssignmentResult();
+      render(result || null);
+    }, delay);
   }
 
   function processTracking(tracking) {
-    if (!tracking) return;
-    lastTracking = tracking.trim();
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      const result = findResultForTracking(lastTracking);
-      render(result || null);
-    }, 700);
+    const value = String(tracking || '').trim();
+    if (!looksLikeTracking(value)) return;
+    lastTracking = value;
+    render(null);
+    scheduleRead(400);
+    setTimeout(() => scheduleRead(0), 900);
+    setTimeout(() => scheduleRead(0), 1600);
   }
 
   function bindInput() {
     const input = detectTrackingInput();
-    if (!input || input.dataset.spxOnholdBound) return;
-    input.dataset.spxOnholdBound = '1';
-    const handler = () => setTimeout(() => processTracking(input.value), 50);
-    input.addEventListener('change', handler, true);
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Enter') handler();
-    }, true);
+    if (!input) return;
+
+    if (!input.dataset.spxOnholdBound) {
+      input.dataset.spxOnholdBound = '1';
+      const handler = () => setTimeout(() => processTracking(input.value), 30);
+      input.addEventListener('input', handler, true);
+      input.addEventListener('change', handler, true);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') handler();
+      }, true);
+    }
+
+    if (looksLikeTracking(input.value) && input.value.trim() !== lastTracking) {
+      processTracking(input.value);
+    }
   }
 
   const observer = new MutationObserver(() => {
@@ -173,8 +217,8 @@
     ensurePanel();
     bindInput();
     if (lastTracking) {
-      const result = findResultForTracking(lastTracking);
-      if (result) render(result);
+      const result = findAssignmentResult();
+      if (result?.driver?.name) render(result);
     }
   });
 
