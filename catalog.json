@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "SPX OnHold",
+  "owner": "RAlDE",
+  "modules": [
+    {
+      "id": "spx-onhold",
+      "name": "SPX OnHold",
+      "version": "0.1.0",
+      "enabled": true,
+      "matches": ["https://spx.shopee.com.br/*"],
+      "scripts": [
+        "https://raw.githubusercontent.com/RAlDE/spx-onhold/main/modules/spx-onhold/spx-onhold.js"
+      ]
+    }
+  ]
+}
