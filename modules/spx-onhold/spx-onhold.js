@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.6';
+  const MODULE_VERSION = '0.2.7';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -34,6 +34,66 @@
       '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
     }[c]));
   }
+
+  const reasonTranslations = new Map([
+    ['cannot find address', 'Endereço não encontrado'],
+    ['disaster', 'Chuva forte / Desastres naturais'],
+    ['do not deliver', 'Não entregar'],
+    ['incorrect/ missing verification', 'Palavra-chave incorreta ou não informada'],
+    ['incorrect/missing verification', 'Palavra-chave incorreta ou não informada'],
+    ['insufficient time', 'Motorista não teve tempo de entregar'],
+    ['insufficient vehicle capacity', 'Não coube no veículo'],
+    ['office closed', 'Comércio fechado'],
+    ['parcel damaged, cannot attempt', 'Item danificado'],
+    ['parcel damaged', 'Item danificado'],
+    ['damaged parcel', 'Item danificado'],
+    ['parcel lost', 'Item perdido'],
+    ['lost parcel', 'Item perdido'],
+    ['recipient change location', 'Mudança de endereço'],
+    ['recipient reject', 'Recusado por terceiros'],
+    ['recipient unavailable for parcel', 'Ausente'],
+    ['reject - buyers change their mind', 'Rejeitado pelo comprador'],
+    ['risky area of delivery', 'Área de risco'],
+    ['robbery/assault', 'Roubo/Assalto'],
+    ['robbery attempt', 'Tentativa de roubo/assalto'],
+    ['attempted robbery/assault', 'Tentativa de roubo/assalto'],
+    ['theft', 'Roubo/Assalto'],
+    ['unforeseen circumstances', 'Motorista desistiu da rota'],
+    ['vehicle breakdown', 'Problemas Mecânicos'],
+    ['wrongly assigned', 'Fora de Rota'],
+    ['out of route', 'Fora de Rota'],
+    ['out of the route', 'Fora de Rota'],
+    ['driver gave up on the route', 'Motorista desistiu da rota'],
+    ['app/internet failure', 'Problemas com internet/app'],
+    ['address incorrect', 'Endereço incorreto'],
+    ['incorrect address', 'Endereço incorreto'],
+    ['incomplete address', 'Endereço incompleto'],
+    ['customer unreachable', 'Não foi possível contatar o destinatário'],
+    ['recipient unreachable', 'Não foi possível contatar o destinatário'],
+    ['customer not at home', 'Destinatário ausente'],
+    ['recipient not at home', 'Destinatário ausente'],
+    ['customer refused', 'Recusado pelo destinatário'],
+    ['recipient refused', 'Recusado pelo destinatário'],
+    ['customer requested reschedule', 'Destinatário solicitou reagendamento'],
+    ['delivery rescheduled', 'Entrega reagendada'],
+    ['bad weather', 'Condições climáticas adversas'],
+    ['traffic jam', 'Congestionamento'],
+    ['road blocked', 'Via bloqueada'],
+    ['no access to location', 'Sem acesso ao local'],
+    ['accident', 'Acidente'],
+    ['driver accident', 'Acidente com o motorista'],
+    ['security issue', 'Problema de segurança'],
+    ['cash on delivery issue', 'Problema no pagamento na entrega'],
+    ['incorrect otp', 'Código de confirmação incorreto'],
+    ['missing otp', 'Código de confirmação não informado']
+  ]);
+
+  function translateReason(reason) {
+    const raw = String(reason || '').trim().replace(/^\[[^\]]+\]\s*/, '');
+    if (!raw) return '';
+    return reasonTranslations.get(norm(raw)) || raw;
+  }
+
 
   const DIAG_KEY = 'spx-onhold-network-source-v1';
   const DIAG_CANDIDATES_KEY = 'spx-onhold-network-candidates-v1';
@@ -786,10 +846,10 @@
         items.push({
           shipmentId,
           latestCtime: Number(latest?.ctime || 0),
-          latestReason: String(latest?.on_hold_reason__desc || latest?.reason_desc || ''),
+          latestReason: translateReason(latest?.on_hold_reason__desc || latest?.reason_desc || ''),
           attempts: ordered.map(attempt => ({
             ctime: Number(attempt?.ctime || 0),
-            reason: String(attempt?.on_hold_reason__desc || attempt?.reason_desc || '')
+            reason: translateReason(attempt?.on_hold_reason__desc || attempt?.reason_desc || '')
           }))
         });
       } catch {}
@@ -973,7 +1033,7 @@
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
-       <div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>`,
+       ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
       `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
     );
 
