@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.9';
+  const MODULE_VERSION = '0.3.0';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1025,8 +1025,8 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">AT: ${esc(data.assignmentId || '—')}</div>
-       <div style="font-size:14px;color:#bbb;margin-top:3px"><b>BR pesquisado:</b> ${esc(lastTracking || '—')}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
+       <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
