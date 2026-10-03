@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.4';
+  const MODULE_VERSION = '0.2.5';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -16,6 +16,7 @@
   let scanLastKeyAt = 0;
   let lastRenderSignature = '';
   let diagnosticView = false;
+  let lastDriverData = null;
 
   const isTargetPage = () =>
     location.hash.includes(ROUTE_FRAGMENT) || location.pathname.includes(ROUTE_FRAGMENT);
@@ -167,12 +168,13 @@
   }
 
   function getStatusMap() {
+    const known = { '2': 'Delivering', '4': 'Delivered', '5': 'OnHold' };
     try {
       const raw = localStorage.getItem(STATUS_MAP_KEY);
       const value = raw ? JSON.parse(raw) : {};
-      return value && typeof value === 'object' ? value : {};
+      return Object.assign({}, known, value && typeof value === 'object' ? value : {});
     } catch {
-      return {};
+      return known;
     }
   }
 
@@ -603,6 +605,31 @@
         <div style="font-size:12px;margin-top:4px">${mappings || 'Ainda não identificado'}</div>
         ${timeRows ? `<div style="font-size:12px;color:#aaa;margin-top:8px"><b>Datas dos OnHold:</b></div><div style="font-size:11px">${timeRows}</div>` : ''}
         ${renderStatusScan()}
+        ${renderOnHoldHints()}
+      </div>`;
+  }
+
+  function renderOnHoldHints() {
+    const scan = getStatusScan();
+    const items = Array.isArray(scan?.onHoldItems) ? scan.onHoldItems : [];
+    if (!items.length) return '';
+
+    const rows = items.slice(0, 3).map(item => {
+      const hints = (item.hints || []).map(h =>
+        `<div style="padding:2px 0"><b>${esc(h.path)}</b>: ${esc(h.value)}</div>`
+      ).join('');
+
+      return `
+        <div style="margin-top:7px;padding-top:6px;border-top:1px solid #333">
+          <div style="font-weight:800">${esc(item.shipment_id || 'OnHold')}</div>
+          <div style="font-size:11px">${hints}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #444">
+        <div style="font-size:12px;color:#aaa;font-weight:700">CAMPOS INTERNOS DO ONHOLD</div>
+        <div style="font-size:11px;max-height:260px;overflow:auto">${rows}</div>
       </div>`;
   }
 
@@ -684,6 +711,24 @@
     }
   }
 
+  function collectOnHoldTimeHints(value, path = '', out = []) {
+    if (!value || typeof value !== 'object') return out;
+
+    for (const [key, child] of Object.entries(value)) {
+      const nextPath = path ? path + '.' + key : key;
+      if (child && typeof child === 'object') {
+        collectOnHoldTimeHints(child, nextPath, out);
+      } else {
+        const nk = norm(key);
+        if (/time|date|created|updated|hold|status/.test(nk)) {
+          out.push({ path: nextPath, value: child });
+        }
+      }
+    }
+
+    return out;
+  }
+
   async function scanAssignmentStatuses(assignmentId) {
     if (!assignmentId) return;
 
@@ -695,6 +740,7 @@
       let page = 1;
       let total = 0;
       const byStatus = {};
+      const onHoldItems = [];
       let safety = 0;
 
       while (safety++ < 50) {
@@ -721,6 +767,14 @@
             };
           }
           byStatus[code].count += 1;
+
+          if (code === '5') {
+            onHoldItems.push({
+              shipment_id: item?.shipment_id || '',
+              on_hold_reason: item?.on_hold_reason ?? null,
+              hints: collectOnHoldTimeHints(item).slice(0, 80)
+            });
+          }
         }
 
         if (!list.length) break;
@@ -733,11 +787,17 @@
         savedAt: Date.now(),
         total,
         pagesRead: page,
-        byStatus
+        byStatus,
+        onHoldItems
       };
 
       localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
-      showDiagnosticToast('SPX OnHold: todos os status da AT foram analisados.');
+
+      if (lastDriverData?.assignmentId === assignmentId && !diagnosticView) {
+        renderDriver(lastDriverData, record);
+      }
+
+      showDiagnosticToast('SPX OnHold: totais da AT atualizados.');
     } catch (error) {
       console.warn('[SPX OnHold] Falha ao analisar status da AT', error);
     }
@@ -767,20 +827,50 @@
       </div>`;
   }
 
-  function renderDriver(data) {
+  function renderDriver(data, scanOverride = null) {
+    lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
     if (diagnosticView) return;
+
+    const scan = scanOverride || getStatusScan();
+    const sameAT = scan?.assignmentId === data.assignmentId;
+    const occurrences = sameAT ? Number(scan?.byStatus?.['5']?.count || 0) : null;
+    const delivering = sameAT ? Number(scan?.byStatus?.['2']?.count || 0) : null;
+
+    const occurrenceText = occurrences === null ? '...' : String(occurrences);
+    const deliveringText = delivering === null ? '...' : String(delivering);
+
+    const details = sameAT && occurrences > 0
+      ? '<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ccc">Horários em identificação...</div>'
+      : '';
+
     setContent(
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
        <div style="font-size:13px;color:#777;margin-top:4px">AT: ${esc(data.assignmentId || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
-       <div style="font-size:18px"><b>Ocorrências:</b> — <span style="float:right">▾</span></div>
-       <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> aguardando consulta</div>
-       <div style="font-size:18px;margin-top:10px"><b>Em rota:</b> —</div>`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}`
+       <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
+         <b>Ocorrências:</b> ${esc(occurrenceText)}
+         ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
+       </div>
+       <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${occurrences > 0 ? 'identificando horário...' : '—'}</div>
+       ${details}
+       <div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>`,
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${occurrenceText}:${deliveringText}`
     );
+
+    const panel = ensurePanel();
+    const toggle = panel.querySelector('[data-toggle-onhold]');
+    const detailsEl = panel.querySelector('[data-onhold-details]');
+    if (toggle && detailsEl) {
+      toggle.addEventListener('click', () => {
+        const open = detailsEl.style.display !== 'none';
+        detailsEl.style.display = open ? 'none' : 'block';
+        const arrow = toggle.querySelector('span');
+        if (arrow) arrow.textContent = open ? '▾' : '▴';
+      });
+    }
   }
 
   function getHeaderInfo(table, wanted) {
