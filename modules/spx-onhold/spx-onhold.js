@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.2';
+  const MODULE_VERSION = '0.2.3';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -37,6 +37,8 @@
   const DIAG_KEY = 'spx-onhold-network-source-v1';
   const DIAG_CANDIDATES_KEY = 'spx-onhold-network-candidates-v1';
   const ORDER_SHAPE_KEY = 'spx-onhold-order-shape-v1';
+  const ORDER_ITEMS_KEY = 'spx-onhold-order-items-v1';
+  const STATUS_MAP_KEY = 'spx-onhold-status-map-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -121,8 +123,100 @@
     return best;
   }
 
+  function extractOrderItems(parsed) {
+    try {
+      const list = parsed?.data?.list;
+      if (!Array.isArray(list)) return [];
+      return list.map(item => {
+        const times = {};
+        for (const [key, value] of Object.entries(item || {})) {
+          if (/time|date|created|updated|hold/i.test(key) &&
+              (typeof value === 'string' || typeof value === 'number')) {
+            times[key] = value;
+          }
+        }
+        return {
+          shipment_id: item?.shipment_id || item?.tracking_number || item?.spx_tn || '',
+          status: item?.status,
+          on_hold_reason: item?.on_hold_reason,
+          times
+        };
+      }).filter(item => item.shipment_id);
+    } catch {
+      return [];
+    }
+  }
+
+  function saveOrderItems(parsed) {
+    const items = extractOrderItems(parsed);
+    if (!items.length) return;
+    try {
+      localStorage.setItem(ORDER_ITEMS_KEY, JSON.stringify(items));
+    } catch {}
+  }
+
+  function getOrderItems() {
+    try {
+      const raw = localStorage.getItem(ORDER_ITEMS_KEY);
+      const value = raw ? JSON.parse(raw) : [];
+      return Array.isArray(value) ? value : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getStatusMap() {
+    try {
+      const raw = localStorage.getItem(STATUS_MAP_KEY);
+      const value = raw ? JSON.parse(raw) : {};
+      return value && typeof value === 'object' ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveStatusMap(map) {
+    try {
+      localStorage.setItem(STATUS_MAP_KEY, JSON.stringify(map));
+    } catch {}
+  }
+
+  function learnStatusMapFromDetailPage() {
+    const items = getOrderItems();
+    if (!items.length) return;
+
+    const map = getStatusMap();
+    let changed = false;
+
+    for (const item of items) {
+      const shipment = String(item.shipment_id || '').trim();
+      if (!shipment) continue;
+
+      const rows = [...document.querySelectorAll('tr,[role="row"]')];
+      const row = rows.find(r => (r.innerText || '').includes(shipment));
+      if (!row) continue;
+
+      const text = String(row.innerText || '');
+      const match = text.match(/\b(OnHold|Delivering|Delivered)\b/i);
+      if (!match) continue;
+
+      const code = String(item.status);
+      const label = match[1];
+      if (map[code] !== label) {
+        map[code] = label;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      saveStatusMap(map);
+      showDiagnosticToast('SPX OnHold: códigos de status identificados.');
+    }
+  }
+
   function saveOrderSearchShape(meta, parsed) {
     try {
+      saveOrderItems(parsed);
       const urlText = String(meta.url || '');
       if (!/assignment_task\/detail\/order\/search/i.test(urlText)) return;
       if (!parsed || typeof parsed !== 'object') return;
@@ -485,6 +579,31 @@
     }
   }
 
+  function renderLearnedStatusMap() {
+    const map = getStatusMap();
+    const items = getOrderItems();
+    if (!Object.keys(map).length && !items.length) return '';
+
+    const mappings = Object.entries(map).map(([code, label]) =>
+      `<div style="padding:3px 0"><b>Status ${esc(code)}</b> = ${esc(label)}</div>`
+    ).join('');
+
+    const onHoldItems = items.filter(item => map[String(item.status)]?.toLowerCase() === 'onhold');
+    const timeRows = onHoldItems.slice(0, 4).map(item => {
+      const fields = Object.entries(item.times || {}).map(([key, value]) =>
+        `<div style="padding:2px 0"><b>${esc(key)}</b>: ${esc(value)}</div>`
+      ).join('');
+      return `<div style="margin-top:6px;border-top:1px solid #333;padding-top:5px"><b>${esc(item.shipment_id)}</b>${fields}</div>`;
+    }).join('');
+
+    return `
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #444">
+        <div style="font-size:12px;color:#aaa;font-weight:700">MAPA APRENDIDO</div>
+        <div style="font-size:12px;margin-top:4px">${mappings || 'Ainda não identificado'}</div>
+        ${timeRows ? `<div style="font-size:12px;color:#aaa;margin-top:8px"><b>Datas dos OnHold:</b></div><div style="font-size:11px">${timeRows}</div>` : ''}
+      </div>`;
+  }
+
   function renderDiagnosticSummary() {
     const shape = getOrderShape();
     const diag = getSavedDiagnostic();
@@ -521,7 +640,8 @@
         <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Campos relevantes:</b></div>
         <div style="font-size:11px;max-height:180px;overflow:auto;margin-top:4px">${hintRows || '—'}</div>
         <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Amostras de pedido:</b></div>
-        <div style="font-size:11px;max-height:280px;overflow:auto">${sampleRows || '—'}</div>`;
+        <div style="font-size:11px;max-height:280px;overflow:auto">${sampleRows || '—'}</div>
+        ${renderLearnedStatusMap()}`;
       return true;
     }
 
@@ -669,6 +789,7 @@
       localStorage.removeItem(DIAG_KEY);
       localStorage.removeItem(DIAG_CANDIDATES_KEY);
       localStorage.removeItem(ORDER_SHAPE_KEY);
+      localStorage.removeItem(ORDER_ITEMS_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
@@ -774,6 +895,7 @@
   enableTrackingInputCapture();
   enableScannerCapture();
   setInterval(mainTick, 100);
+  setInterval(learnStatusMapFromDetailPage, 500);
 
   if (isTargetPage()) {
     ensureToggle();
