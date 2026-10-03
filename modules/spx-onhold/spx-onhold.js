@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.1.8';
+  const MODULE_VERSION = '0.1.9';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -15,6 +15,7 @@
   let scanBuffer = '';
   let scanLastKeyAt = 0;
   let lastRenderSignature = '';
+  let diagnosticView = false;
 
   const isTargetPage = () =>
     location.hash.includes(ROUTE_FRAGMENT) || location.pathname.includes(ROUTE_FRAGMENT);
@@ -211,7 +212,10 @@
     panel.innerHTML = `
       <div data-drag style="background:#ff6b00;color:#111;padding:12px 14px;font-size:19px;font-weight:800;cursor:move;user-select:none;display:flex;justify-content:space-between;align-items:center">
         <span>SPX OnHold <small style="font-size:11px;font-weight:700;opacity:.75">v${MODULE_VERSION}</small></span>
-        <button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
+        <span style="display:flex;gap:6px">
+          <button data-diag title="Diagnóstico" style="border:1px solid #111;background:#111;color:#fff;border-radius:6px;width:28px;height:28px;font-size:15px;font-weight:900;cursor:pointer">i</button>
+          <button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
+        </span>
       </div>
       <div data-content style="padding:15px;font-size:16px;line-height:1.45">
         <b>Sem informação</b>
@@ -222,6 +226,25 @@
     panel.querySelector('[data-close]').addEventListener('click', () => {
       panelOpen = false;
       panel.style.display = 'none';
+    });
+
+    panel.querySelector('[data-diag]').addEventListener('click', () => {
+      diagnosticView = !diagnosticView;
+      if (diagnosticView) {
+        if (!renderDiagnosticSummary()) {
+          const content = panel.querySelector('[data-content]');
+          content.innerHTML = '<b style="font-size:18px">Nenhum diagnóstico salvo</b><div style="margin-top:8px;color:#aaa;font-size:13px">Bipe um BR, clique em Visualizar e aguarde a mensagem de fonte encontrada.</div>';
+        }
+      } else {
+        lastRenderSignature = '';
+        if (lastTracking) {
+          const result = findFilteredAssignment();
+          if (result?.assignmentId && result?.driver?.name) renderDriver(result);
+          else renderNoInfo();
+        } else {
+          renderNoInfo();
+        }
+      }
     });
 
     enableDragging(panel, panel.querySelector('[data-drag]'));
@@ -293,6 +316,7 @@
   }
 
   function renderWaiting(br) {
+    if (diagnosticView) return;
     setContent(
       `<div style="font-size:13px;color:#aaa;font-weight:700">BR DETECTADO</div>
        <div style="font-size:18px;font-weight:800;margin-top:3px">${esc(br)}</div>
@@ -302,6 +326,7 @@
   }
 
   function renderNoInfo() {
+    if (diagnosticView) return;
     setContent(
       '<b style="font-size:18px">Sem informação</b>',
       'no-info'
@@ -321,6 +346,8 @@
     const diag = getSavedDiagnostic();
     if (!diag) return false;
 
+    diagnosticView = true;
+    lastRenderSignature = '';
     const panel = ensurePanel();
     const content = panel.querySelector('[data-content]');
     panel.style.display = panelOpen ? 'block' : 'none';
@@ -337,6 +364,7 @@
   }
 
   function renderDriver(data) {
+    if (diagnosticView) return;
     setContent(
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
