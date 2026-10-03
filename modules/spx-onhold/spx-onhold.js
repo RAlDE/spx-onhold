@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.1';
+  const MODULE_VERSION = '0.3.2';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -875,8 +875,32 @@
   }
 
   function isReturnLmHubOnhold(item) {
+    return objectContainsReturnLmHubOnhold(item);
+  }
+
+  function objectContainsReturnLmHubOnhold(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') {
+      return /return[_\s-]*lmhub[_\s-]*onhold/i.test(value);
+    }
+    if (Array.isArray(value)) {
+      return value.some(objectContainsReturnLmHubOnhold);
+    }
+    if (typeof value === 'object') {
+      return Object.values(value).some(objectContainsReturnLmHubOnhold);
+    }
+    return false;
+  }
+
+  async function searchedBrIsReturnOnhold(shipmentId) {
+    if (!shipmentId) return false;
     try {
-      return /return[_\s-]*lmhub[_\s-]*onhold/i.test(JSON.stringify(item || {}));
+      const url = '/api/fleet_order/order/detail/tracking_info?shipment_id='
+        + encodeURIComponent(shipmentId);
+      const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!response.ok) return false;
+      const parsed = await response.json();
+      return objectContainsReturnLmHubOnhold(parsed);
     } catch {
       return false;
     }
@@ -942,6 +966,24 @@
         page += 1;
       }
 
+      // O BR pesquisado pode vir como Return_LMHub_Onhold em outra consulta
+      // e não aparecer como status 5 no order/search da AT. Conferimos ele
+      // diretamente para garantir que entre na contagem e na lista.
+      const searchedReturnOnhold = await searchedBrIsReturnOnhold(lastTracking);
+      if (searchedReturnOnhold && lastTracking) {
+        const alreadyIncluded = onHoldShipments.includes(lastTracking);
+        if (!alreadyIncluded) {
+          occurrenceCount += 1;
+          onHoldShipments.push(lastTracking);
+          onHoldItems.push({
+            shipment_id: lastTracking,
+            on_hold_reason: null,
+            return_lmhub_onhold: true,
+            hints: []
+          });
+        }
+      }
+
       const record = {
         assignmentId,
         savedAt: Date.now(),
@@ -949,7 +991,8 @@
         pagesRead: page,
         byStatus,
         onHoldItems,
-        occurrenceCount
+        occurrenceCount,
+        searchedReturnOnhold
       };
 
       localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
