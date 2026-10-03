@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.1.6';
+  const MODULE_VERSION = '0.1.7';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -31,6 +31,148 @@
     return String(value ?? '').replace(/[&<>'"]/g, c => ({
       '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
     }[c]));
+  }
+
+  const DIAG_KEY = 'spx-onhold-network-source-v1';
+
+  function showDiagnosticToast(message) {
+    let toast = document.getElementById('spx-onhold-diagnostic-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'spx-onhold-diagnostic-toast';
+      toast.style.cssText =
+        'position:fixed;right:18px;bottom:18px;z-index:2147483647;background:#111;color:#fff;border:1px solid #ff6b00;border-radius:10px;padding:12px 14px;font:700 14px Arial;box-shadow:0 6px 22px #0008;max-width:360px';
+      document.documentElement.appendChild(toast);
+    }
+    toast.textContent = message;
+    clearTimeout(showDiagnosticToast.timer);
+    showDiagnosticToast.timer = setTimeout(() => toast.remove(), 6000);
+  }
+
+  function findStatusObjects(value, out = []) {
+    if (!value || typeof value !== 'object') return out;
+
+    if (Array.isArray(value)) {
+      for (const item of value) findStatusObjects(item, out);
+      return out;
+    }
+
+    const entries = Object.entries(value);
+    for (const [key, raw] of entries) {
+      const k = norm(key);
+      const v = norm(raw);
+      if ((k.includes('status') || k === 'state') && (v === 'onhold' || v === 'delivering')) {
+        let timestamp = '';
+        for (const [tk, tv] of entries) {
+          const nk = norm(tk);
+          if (/time|date|created|updated|onhold/.test(nk) && (typeof tv === 'string' || typeof tv === 'number')) {
+            timestamp = String(tv);
+            break;
+          }
+        }
+        out.push({ status: String(raw), timestamp, keys: entries.map(([name]) => name).slice(0, 25) });
+        break;
+      }
+    }
+
+    for (const [, child] of entries) {
+      if (child && typeof child === 'object') findStatusObjects(child, out);
+    }
+
+    return out;
+  }
+
+  function saveDiagnosticSource(meta, parsed, rawText) {
+    const items = findStatusObjects(parsed);
+    const text = String(rawText || '');
+    if (!items.length && !/\bOnHold\b|\bDelivering\b/i.test(text)) return;
+
+    const atMatch = text.match(/AT[A-Z0-9]+/i);
+    const record = {
+      capturedAt: new Date().toISOString(),
+      at: atMatch ? atMatch[0] : '',
+      method: meta.method || 'GET',
+      url: meta.url || '',
+      body: typeof meta.body === 'string' ? meta.body.slice(0, 4000) : '',
+      onHoldInResponse: items.filter(x => norm(x.status) === 'onhold').length,
+      deliveringInResponse: items.filter(x => norm(x.status) === 'delivering').length,
+      sample: items.slice(0, 5)
+    };
+
+    try {
+      localStorage.setItem(DIAG_KEY, JSON.stringify(record));
+    } catch {}
+
+    showDiagnosticToast('SPX OnHold: fonte de dados encontrada.');
+  }
+
+  async function inspectFetchResponse(response, meta) {
+    try {
+      const url = new URL(meta.url, location.href);
+      if (url.origin !== location.origin) return;
+
+      const clone = response.clone();
+      const text = await clone.text();
+      if (!text || (!/OnHold|Delivering/i.test(text))) return;
+
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch {}
+      saveDiagnosticSource(meta, parsed, text);
+    } catch {}
+  }
+
+  function installNetworkDiagnostic() {
+    if (window.__SPX_ONHOLD_NETWORK_DIAG__) return;
+    window.__SPX_ONHOLD_NETWORK_DIAG__ = true;
+
+    const originalFetch = window.fetch;
+    window.fetch = function(input, init = {}) {
+      const url = typeof input === 'string' ? input : (input?.url || '');
+      const method = init.method || (typeof input !== 'string' ? input?.method : '') || 'GET';
+      const body = typeof init.body === 'string' ? init.body : '';
+      const promise = originalFetch.apply(this, arguments);
+      promise.then(response => inspectFetchResponse(response, { url, method, body }));
+      return promise;
+    };
+
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url) {
+      this.__spxOnholdMeta = { method: method || 'GET', url: String(url || ''), body: '' };
+      return originalOpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function(body) {
+      if (this.__spxOnholdMeta && typeof body === 'string') {
+        this.__spxOnholdMeta.body = body.slice(0, 4000);
+      }
+
+      this.addEventListener('load', function() {
+        try {
+          const meta = this.__spxOnholdMeta || {};
+          const url = new URL(meta.url || '', location.href);
+          if (url.origin !== location.origin) return;
+
+          let text = '';
+          let parsed = null;
+
+          if (this.responseType === 'json') {
+            parsed = this.response;
+            text = JSON.stringify(parsed);
+          } else if (!this.responseType || this.responseType === 'text') {
+            text = this.responseText || '';
+            try { parsed = JSON.parse(text); } catch {}
+          }
+
+          if (/OnHold|Delivering/i.test(text)) {
+            saveDiagnosticSource(meta, parsed, text);
+          }
+        } catch {}
+      });
+
+      return originalSend.apply(this, arguments);
+    };
   }
 
   function looksLikeTracking(value) {
@@ -376,6 +518,7 @@
     }
   }
 
+  installNetworkDiagnostic();
   enableTrackingInputCapture();
   enableScannerCapture();
   setInterval(mainTick, 100);
