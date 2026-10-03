@@ -7,6 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
+  const MODULE_VERSION = '0.1.3';
 
   let lastTracking = '';
   let panelOpen = true;
@@ -44,7 +45,7 @@
     panel.style.cssText = 'position:fixed;left:16px;top:140px;width:330px;z-index:2147483646;background:#080808;color:#fff;border:1px solid #ff6b00;border-radius:12px;box-shadow:0 10px 35px #0009;overflow:hidden;font-family:Arial,sans-serif';
     panel.innerHTML = `
       <div data-drag style="background:#ff6b00;color:#111;padding:12px 14px;font-size:19px;font-weight:800;cursor:move;user-select:none;display:flex;justify-content:space-between;align-items:center">
-        <span>SPX OnHold</span><button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
+        <span>SPX OnHold <small style="font-size:11px;font-weight:700;opacity:.75">v${MODULE_VERSION}</small></span><button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
       </div>
       <div data-content style="padding:15px;font-size:16px;line-height:1.45"><b>Sem informação</b></div>`;
     document.documentElement.appendChild(panel);
@@ -105,27 +106,37 @@
     const tables = [...document.querySelectorAll('table')];
     for (const table of tables) {
       const headers = getHeaders(table);
-      const driverIndex = headers.findIndex(h => /motorista|driver/.test(h));
+      const driverIndex = headers.findIndex(h => /^motorista$/.test(h) || (/motorista/.test(h) && !/estação|estacao/.test(h)) || /^driver$/.test(h));
       const actionIndex = headers.findIndex(h => /ação|acao|action/.test(h));
-      if (driverIndex < 0 || actionIndex < 0) continue;
 
       const rows = [...table.querySelectorAll('tbody tr')]
         .filter(row => row.offsetParent !== null && row.querySelectorAll('td').length > 0);
 
-      if (!rows.length) continue;
+      for (const row of rows) {
+        const cells = [...row.querySelectorAll('td')];
+        let driverText = '';
 
-      const row = rows[0];
-      const cells = [...row.querySelectorAll('td')];
-      const driver = parseDriver(cells[driverIndex]?.innerText || '');
-      const link = cells[actionIndex]?.querySelector('a');
-      const assignmentId = (row.innerText.match(/AT[A-Z0-9]+/i) || [])[0] || '';
+        if (driverIndex >= 0 && cells[driverIndex]) {
+          driverText = cells[driverIndex].innerText || '';
+        }
 
-      return {
-        tracking: lastTracking,
-        driver,
-        assignmentId,
-        detailHref: link?.href || ''
-      };
+        if (!/\[\d+\]/.test(driverText)) {
+          driverText = (row.innerText.match(/\[\d+\]\s*[^\n]+/) || [])[0] || driverText;
+        }
+
+        const driver = parseDriver(driverText);
+        if (!driver.name) continue;
+
+        const link = actionIndex >= 0 ? cells[actionIndex]?.querySelector('a') : row.querySelector('a');
+        const assignmentId = (row.innerText.match(/AT[A-Z0-9]+/i) || [])[0] || '';
+
+        return {
+          tracking: lastTracking,
+          driver,
+          assignmentId,
+          detailHref: link?.href || ''
+        };
+      }
     }
     return null;
   }
@@ -246,6 +257,16 @@
     }, true);
   }
 
+  function startTableWatcher() {
+    setInterval(() => {
+      if (!isTargetPage()) return;
+      const result = findAssignmentResult();
+      if (result?.driver?.name) {
+        render(result);
+      }
+    }, 500);
+  }
+
   const observer = new MutationObserver(() => {
     if (!isTargetPage()) return;
     ensureToggle();
@@ -259,6 +280,7 @@
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
   enableScannerCapture();
+  startTableWatcher();
 
   if (isTargetPage()) {
     ensureToggle();
