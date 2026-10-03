@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.7';
+  const MODULE_VERSION = '0.3.8';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -277,7 +277,7 @@
 
     if (changed) {
       saveStatusMap(map);
-      showDiagnosticToast('SPX OnHold: códigos de status identificados.');
+
     }
   }
 
