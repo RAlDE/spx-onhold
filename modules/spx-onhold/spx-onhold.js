@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.8';
+  const MODULE_VERSION = '0.2.9';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1026,6 +1026,7 @@
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
        <div style="font-size:13px;color:#777;margin-top:4px">AT: ${esc(data.assignmentId || '—')}</div>
+       <div style="font-size:14px;color:#bbb;margin-top:3px"><b>BR pesquisado:</b> ${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
@@ -1034,7 +1035,7 @@
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
     );
 
     const panel = ensurePanel();
