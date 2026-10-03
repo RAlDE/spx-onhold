@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.1.5';
+  const MODULE_VERSION = '0.1.6';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -225,18 +225,22 @@
   }
 
   function findFilteredAssignment() {
+    // Só lemos a tabela durante uma busca ativa por BR.
+    if (!lastTracking || Date.now() > activeSearchUntil) return null;
+
     const tables = [...document.querySelectorAll('table')];
 
     for (const table of tables) {
-      const atHeader = getHeaderInfo(table, text =>
+      const headers = [...table.querySelectorAll('thead th')].map(th => norm(th.innerText));
+
+      const atIndex = headers.findIndex(text =>
         text === 'id da at' || (text.includes('id') && text.includes('at'))
       );
 
-      const driverHeader = getHeaderInfo(table, text =>
-        text === 'motorista'
-      );
+      const driverIndex = headers.findIndex(text => text === 'motorista');
+      const actionIndex = headers.findIndex(text => text === 'acao' || text === 'ação');
 
-      if (!atHeader || !driverHeader) continue;
+      if (atIndex < 0 || driverIndex < 0) continue;
 
       const rows = [...table.querySelectorAll('tbody tr')].filter(row => {
         if (row.offsetParent === null) return false;
@@ -244,22 +248,23 @@
         return cells.length > 0 && /AT[A-Z0-9]+/i.test(row.innerText || '');
       });
 
-      // A busca por BR deve retornar uma única atribuição.
-      // Se houver várias linhas, não escolhemos uma ao acaso.
+      // Antes do bip aparecem várias ATs. Só aceitamos o estado filtrado,
+      // quando o SPX deixa uma única linha de resultado.
       if (rows.length !== 1) continue;
 
       const row = rows[0];
-      const atCell = cellAtColumn(row, atHeader.centerX);
-      const driverCell = cellAtColumn(row, driverHeader.centerX);
+      const cells = [...row.querySelectorAll('td')];
 
       const assignmentId =
-        ((atCell?.innerText || '').match(/AT[A-Z0-9]+/i) || [])[0] || '';
+        ((cells[atIndex]?.innerText || '').match(/AT[A-Z0-9]+/i) || [])[0] || '';
 
-      const driver = parseDriver(driverCell?.innerText || '');
+      const driver = parseDriver(cells[driverIndex]?.innerText || '');
+      const detailHref =
+        actionIndex >= 0 ? (cells[actionIndex]?.querySelector('a')?.href || '') : '';
 
       if (!assignmentId) continue;
 
-      return { assignmentId, driver, row };
+      return { assignmentId, driver, detailHref, row };
     }
 
     return null;
@@ -301,6 +306,20 @@
     if (looksLikeTracking(value) && value.toUpperCase() !== lastTracking) {
       beginTracking(value);
     }
+  }
+
+  function enableTrackingInputCapture() {
+    document.addEventListener('input', event => {
+      if (!isTargetPage()) return;
+      const value = String(event.target?.value || '').trim();
+      if (looksLikeTracking(value)) beginTracking(value);
+    }, true);
+
+    document.addEventListener('change', event => {
+      if (!isTargetPage()) return;
+      const value = String(event.target?.value || '').trim();
+      if (looksLikeTracking(value)) beginTracking(value);
+    }, true);
   }
 
   function enableScannerCapture() {
@@ -357,8 +376,9 @@
     }
   }
 
+  enableTrackingInputCapture();
   enableScannerCapture();
-  setInterval(mainTick, 200);
+  setInterval(mainTick, 100);
 
   if (isTargetPage()) {
     ensureToggle();
