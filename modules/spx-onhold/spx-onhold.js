@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.0';
+  const MODULE_VERSION = '0.3.1';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -17,6 +17,8 @@
   let lastRenderSignature = '';
   let diagnosticView = false;
   let lastDriverData = null;
+  let preSearchAssignmentSignature = '';
+  let searchStartedAt = 0;
 
   const isTargetPage = () =>
     location.hash.includes(ROUTE_FRAGMENT) || location.pathname.includes(ROUTE_FRAGMENT);
@@ -872,6 +874,14 @@
     return record;
   }
 
+  function isReturnLmHubOnhold(item) {
+    try {
+      return /return[_\s-]*lmhub[_\s-]*onhold/i.test(JSON.stringify(item || {}));
+    } catch {
+      return false;
+    }
+  }
+
   async function scanAssignmentStatuses(assignmentId) {
     if (!assignmentId) return;
 
@@ -885,6 +895,7 @@
       const byStatus = {};
       const onHoldItems = [];
       const onHoldShipments = [];
+      let occurrenceCount = 0;
       let safety = 0;
 
       while (safety++ < 50) {
@@ -912,11 +923,14 @@
           }
           byStatus[code].count += 1;
 
-          if (code === '5') {
+          const countsAsOccurrence = code === '5' || isReturnLmHubOnhold(item);
+          if (countsAsOccurrence) {
+            occurrenceCount += 1;
             const shipmentId = item?.shipment_id || '';
             onHoldItems.push({
               shipment_id: shipmentId,
               on_hold_reason: item?.on_hold_reason ?? null,
+              return_lmhub_onhold: isReturnLmHubOnhold(item),
               hints: collectOnHoldTimeHints(item).slice(0, 80)
             });
             if (shipmentId) onHoldShipments.push(shipmentId);
@@ -934,7 +948,8 @@
         total,
         pagesRead: page,
         byStatus,
-        onHoldItems
+        onHoldItems,
+        occurrenceCount
       };
 
       localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
@@ -982,7 +997,7 @@
 
     const scan = scanOverride || getStatusScan();
     const sameAT = scan?.assignmentId === data.assignmentId;
-    const occurrences = sameAT ? Number(scan?.byStatus?.['5']?.count || 0) : null;
+    const occurrences = sameAT ? Number(scan?.occurrenceCount ?? scan?.byStatus?.['5']?.count ?? 0) : null;
     const delivering = sameAT ? Number(scan?.byStatus?.['2']?.count || 0) : null;
 
     const detail = getOnHoldDetail();
@@ -1095,10 +1110,7 @@
       : { id: '', name: raw };
   }
 
-  function findFilteredAssignment() {
-    // Só lemos a tabela durante uma busca ativa por BR.
-    if (!lastTracking || Date.now() > activeSearchUntil) return null;
-
+  function readSingleAssignment() {
     const tables = [...document.querySelectorAll('table')];
 
     for (const table of tables) {
@@ -1119,8 +1131,6 @@
         return cells.length > 0 && /AT[A-Z0-9]+/i.test(row.innerText || '');
       });
 
-      // Antes do bip aparecem várias ATs. Só aceitamos o estado filtrado,
-      // quando o SPX deixa uma única linha de resultado.
       if (rows.length !== 1) continue;
 
       const row = rows[0];
@@ -1141,10 +1151,45 @@
     return null;
   }
 
+  function assignmentSignature(result) {
+    if (!result) return '';
+    return [
+      result.assignmentId || '',
+      result.driver?.id || '',
+      result.driver?.name || ''
+    ].join('|');
+  }
+
+  function findFilteredAssignment() {
+    if (!lastTracking || Date.now() > activeSearchUntil) return null;
+
+    const result = readSingleAssignment();
+    if (!result) return null;
+
+    const signature = assignmentSignature(result);
+    const elapsed = Date.now() - searchStartedAt;
+
+    // Logo após o bip a tabela ainda pode conter o resultado anterior.
+    // Enquanto a assinatura for igual à que existia antes da busca,
+    // esperamos o SPX atualizar. Se o novo BR realmente pertencer à
+    // mesma AT/motorista, liberamos após 1,6 s.
+    if (preSearchAssignmentSignature &&
+        signature === preSearchAssignmentSignature &&
+        elapsed < 1600) {
+      return null;
+    }
+
+    return result;
+  }
+
   function beginTracking(br) {
     const value = String(br || '').trim().toUpperCase();
     if (!looksLikeTracking(value)) return;
     if (value === lastTracking && Date.now() < activeSearchUntil) return;
+
+    const previous = readSingleAssignment();
+    preSearchAssignmentSignature = assignmentSignature(previous);
+    searchStartedAt = Date.now();
 
     lastTracking = value;
     activeSearchUntil = Date.now() + 6000;
