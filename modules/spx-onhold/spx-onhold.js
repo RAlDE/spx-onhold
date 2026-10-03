@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.7';
+  const MODULE_VERSION = '0.2.8';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1262,8 +1262,9 @@
   setInterval(learnStatusMapFromDetailPage, 500);
 
   if (isTargetPage()) {
+    diagnosticView = false;
     ensureToggle();
     ensurePanel();
-    renderDiagnosticSummary();
+    renderNoInfo();
   }
 })();
