@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.5';
+  const MODULE_VERSION = '0.3.6';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1212,7 +1212,7 @@
         renderDriver(lastDriverData, record);
       }
 
-      showDiagnosticToast('SPX OnHold: totais da AT atualizados.');
+
     } catch (error) {
       console.warn('[SPX OnHold] Falha ao analisar status da AT', error);
     }
