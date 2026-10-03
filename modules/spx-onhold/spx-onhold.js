@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.1';
+  const MODULE_VERSION = '0.2.2';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -36,6 +36,7 @@
 
   const DIAG_KEY = 'spx-onhold-network-source-v1';
   const DIAG_CANDIDATES_KEY = 'spx-onhold-network-candidates-v1';
+  const ORDER_SHAPE_KEY = 'spx-onhold-order-shape-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -84,6 +85,73 @@
     return out;
   }
 
+  function collectPrimitiveHints(value, path = '', out = []) {
+    if (!value || typeof value !== 'object') return out;
+    for (const [key, child] of Object.entries(value)) {
+      const nextPath = path ? path + '.' + key : key;
+      if (child && typeof child === 'object') {
+        collectPrimitiveHints(child, nextPath, out);
+      } else {
+        const nk = norm(key);
+        if (/status|state|time|date|created|updated|hold|deliver|page|count|total/.test(nk)) {
+          out.push({ path: nextPath, value: String(child).slice(0, 180) });
+        }
+      }
+    }
+    return out;
+  }
+
+  function findLargestObjectArray(value, path = 'root', best = { path: '', items: [] }) {
+    if (!value || typeof value !== 'object') return best;
+
+    if (Array.isArray(value)) {
+      const objectItems = value.filter(item => item && typeof item === 'object' && !Array.isArray(item));
+      if (objectItems.length > best.items.length) {
+        best = { path, items: objectItems };
+      }
+      value.forEach((child, index) => {
+        best = findLargestObjectArray(child, path + '[' + index + ']', best);
+      });
+      return best;
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      best = findLargestObjectArray(child, path + '.' + key, best);
+    }
+    return best;
+  }
+
+  function saveOrderSearchShape(meta, parsed) {
+    try {
+      const urlText = String(meta.url || '');
+      if (!/assignment_task\/detail\/order\/search/i.test(urlText)) return;
+      if (!parsed || typeof parsed !== 'object') return;
+
+      const largest = findLargestObjectArray(parsed);
+      const samples = largest.items.slice(0, 3).map(item => ({
+        keys: Object.keys(item).slice(0, 50),
+        interesting: Object.entries(item)
+          .filter(([key]) => /status|state|time|date|created|updated|hold|deliver|tracking|order/.test(norm(key)))
+          .slice(0, 25)
+          .map(([key, value]) => ({ key, value: String(value).slice(0, 180) }))
+      }));
+
+      const record = {
+        capturedAt: new Date().toISOString(),
+        method: meta.method || 'GET',
+        url: urlText,
+        topKeys: Array.isArray(parsed) ? ['<array>'] : Object.keys(parsed).slice(0, 30),
+        arrayPath: largest.path,
+        arrayLength: largest.items.length,
+        hints: collectPrimitiveHints(parsed).slice(0, 60),
+        samples
+      };
+
+      localStorage.setItem(ORDER_SHAPE_KEY, JSON.stringify(record));
+      showDiagnosticToast('SPX OnHold: estrutura dos pedidos capturada.');
+    } catch {}
+  }
+
   function saveDiagnosticCandidate(meta, parsed, rawText) {
     try {
       const urlText = String(meta.url || '');
@@ -121,6 +189,7 @@
   }
 
   function saveDiagnosticSource(meta, parsed, rawText) {
+    saveOrderSearchShape(meta, parsed);
     saveDiagnosticCandidate(meta, parsed, rawText);
     const items = findStatusObjects(parsed);
     const text = String(rawText || '');
@@ -407,11 +476,21 @@
     }
   }
 
+  function getOrderShape() {
+    try {
+      const raw = localStorage.getItem(ORDER_SHAPE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
   function renderDiagnosticSummary() {
+    const shape = getOrderShape();
     const diag = getSavedDiagnostic();
     const candidates = getDiagnosticCandidates();
 
-    if (!diag && !candidates.length) return false;
+    if (!shape && !diag && !candidates.length) return false;
 
     diagnosticView = true;
     lastRenderSignature = '';
@@ -419,14 +498,39 @@
     const content = panel.querySelector('[data-content]');
     panel.style.display = panelOpen ? 'block' : 'none';
 
+    if (shape) {
+      const hintRows = (shape.hints || []).slice(0, 24).map(item =>
+        `<div style="padding:3px 0;border-bottom:1px solid #222"><b>${esc(item.path)}</b>: ${esc(item.value)}</div>`
+      ).join('');
+
+      const sampleRows = (shape.samples || []).map((sample, index) => {
+        const fields = (sample.interesting || []).map(item =>
+          `<div style="padding:2px 0"><b>${esc(item.key)}</b>: ${esc(item.value)}</div>`
+        ).join('');
+        return `<div style="margin-top:9px;padding-top:7px;border-top:1px solid #333">
+          <div style="font-weight:800;color:#ff8a33">ITEM ${index + 1}</div>
+          <div style="font-size:11px;color:#888;word-break:break-all;margin-top:3px">Chaves: ${esc((sample.keys || []).join(', '))}</div>
+          <div style="margin-top:5px">${fields || '<span style="color:#888">Sem campos selecionados</span>'}</div>
+        </div>`;
+      }).join('');
+
+      content.innerHTML = `
+        <div style="font-size:13px;color:#aaa;font-weight:700">ESTRUTURA ORDER SEARCH</div>
+        <div style="font-size:12px;margin-top:7px;word-break:break-all"><b>Array:</b> ${esc(shape.arrayPath || '—')} · ${esc(shape.arrayLength ?? '—')} itens</div>
+        <div style="font-size:12px;margin-top:4px;word-break:break-all"><b>Top keys:</b> ${esc((shape.topKeys || []).join(', '))}</div>
+        <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Campos relevantes:</b></div>
+        <div style="font-size:11px;max-height:180px;overflow:auto;margin-top:4px">${hintRows || '—'}</div>
+        <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Amostras de pedido:</b></div>
+        <div style="font-size:11px;max-height:280px;overflow:auto">${sampleRows || '—'}</div>`;
+      return true;
+    }
+
     if (diag) {
       content.innerHTML = `
         <div style="font-size:13px;color:#aaa;font-weight:700">DIAGNÓSTICO CAPTURADO</div>
         <div style="font-size:15px;margin-top:8px"><b>Método:</b> ${esc(diag.method || '—')}</div>
         <div style="font-size:13px;margin-top:6px;word-break:break-all"><b>URL:</b> ${esc(diag.url || '—')}</div>
-        <div style="font-size:15px;margin-top:8px"><b>AT:</b> ${esc(diag.at || '—')}</div>
-        <div style="font-size:15px;margin-top:6px"><b>OnHold encontrados:</b> ${esc(diag.onHoldInResponse ?? '—')}</div>
-        <div style="font-size:15px;margin-top:4px"><b>Delivering encontrados:</b> ${esc(diag.deliveringInResponse ?? '—')}</div>`;
+        <div style="font-size:15px;margin-top:8px"><b>AT:</b> ${esc(diag.at || '—')}</div>`;
       return true;
     }
 
@@ -440,15 +544,12 @@
         <div style="padding:8px 0;border-bottom:1px solid #333">
           <div style="font-size:12px;color:#ff8a33;font-weight:800">#${index + 1} ${esc(item.method || 'GET')} · ${esc(item.size || 0)} bytes</div>
           <div style="font-size:12px;margin-top:3px;word-break:break-all">${esc(path)}</div>
-          <div style="font-size:11px;color:#999;margin-top:3px">AT: ${esc(item.at || '—')} · OnHold: ${item.hasOnHoldWord ? 'sim' : 'não'} · Delivering: ${item.hasDeliveringWord ? 'sim' : 'não'}</div>
         </div>`;
     }).join('');
 
     content.innerHTML = `
       <div style="font-size:13px;color:#aaa;font-weight:700">REQUISIÇÕES CANDIDATAS</div>
-      <div style="font-size:12px;color:#999;margin-top:5px">Últimas respostas JSON do SPX após abrir a AT.</div>
-      <div style="margin-top:8px;max-height:430px;overflow:auto">${rows}</div>
-      <div style="font-size:12px;color:#999;margin-top:10px">Envie uma foto desta lista.</div>`;
+      <div style="margin-top:8px;max-height:430px;overflow:auto">${rows}</div>`;
     return true;
   }
 
@@ -567,6 +668,7 @@
     try {
       localStorage.removeItem(DIAG_KEY);
       localStorage.removeItem(DIAG_CANDIDATES_KEY);
+      localStorage.removeItem(ORDER_SHAPE_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
