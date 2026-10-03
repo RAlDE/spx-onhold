@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.2';
+  const MODULE_VERSION = '0.3.3';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -104,6 +104,7 @@
   const STATUS_MAP_KEY = 'spx-onhold-status-map-v1';
   const STATUS_SCAN_KEY = 'spx-onhold-status-scan-v1';
   const ONHOLD_DETAIL_KEY = 'spx-onhold-detail-v1';
+  const BR_SCAN_KEY = 'spx-onhold-br-scan-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -348,7 +349,50 @@
     } catch {}
   }
 
+  function saveBrScanCandidate(meta, parsed, rawText) {
+    try {
+      const text = String(rawText || '');
+      const urlText = String(meta.url || '');
+      if (!text || !urlText) return;
+
+      const hasCurrentBr = lastTracking && text.includes(lastTracking);
+      const hasReturnOnhold = /Return_LMHub_Onhold/i.test(text);
+      if (!hasCurrentBr && !hasReturnOnhold) return;
+
+      const hints = collectPrimitiveHints(parsed).filter(item =>
+        /status|state|hold|return|lmhub|time|date|created|updated/i.test(item.path)
+      ).slice(0, 40);
+
+      const candidate = {
+        capturedAt: new Date().toISOString(),
+        method: meta.method || 'GET',
+        url: urlText,
+        size: text.length,
+        hasCurrentBr: Boolean(hasCurrentBr),
+        hasReturnOnhold: Boolean(hasReturnOnhold),
+        hints
+      };
+
+      let list = [];
+      try {
+        list = JSON.parse(localStorage.getItem(BR_SCAN_KEY) || '[]');
+        if (!Array.isArray(list)) list = [];
+      } catch {}
+
+      const signature = candidate.method + '|' + candidate.url;
+      list = list.filter(item => (item.method + '|' + item.url) !== signature);
+      list.unshift(candidate);
+      list = list.slice(0, 20);
+      localStorage.setItem(BR_SCAN_KEY, JSON.stringify(list));
+
+      if (hasReturnOnhold) {
+        showDiagnosticToast('SPX OnHold: Return_LMHub_Onhold encontrado na varredura.');
+      }
+    } catch {}
+  }
+
   function saveDiagnosticSource(meta, parsed, rawText) {
+    saveBrScanCandidate(meta, parsed, rawText);
     saveOrderSearchShape(meta, parsed);
     saveDiagnosticCandidate(meta, parsed, rawText);
     const items = findStatusObjects(parsed);
@@ -696,72 +740,125 @@
       </div>`;
   }
 
-  function renderDiagnosticSummary() {
-    const shape = getOrderShape();
-    const diag = getSavedDiagnostic();
-    const candidates = getDiagnosticCandidates();
-
-    if (!shape && !diag && !candidates.length) return false;
-
-    diagnosticView = true;
-    lastRenderSignature = '';
-    const panel = ensurePanel();
-    const content = panel.querySelector('[data-content]');
-    panel.style.display = panelOpen ? 'block' : 'none';
-
-    if (shape) {
-      const hintRows = (shape.hints || []).slice(0, 24).map(item =>
-        `<div style="padding:3px 0;border-bottom:1px solid #222"><b>${esc(item.path)}</b>: ${esc(item.value)}</div>`
-      ).join('');
-
-      const sampleRows = (shape.samples || []).map((sample, index) => {
-        const fields = (sample.interesting || []).map(item =>
-          `<div style="padding:2px 0"><b>${esc(item.key)}</b>: ${esc(item.value)}</div>`
-        ).join('');
-        return `<div style="margin-top:9px;padding-top:7px;border-top:1px solid #333">
-          <div style="font-weight:800;color:#ff8a33">ITEM ${index + 1}</div>
-          <div style="font-size:11px;color:#888;word-break:break-all;margin-top:3px">Chaves: ${esc((sample.keys || []).join(', '))}</div>
-          <div style="margin-top:5px">${fields || '<span style="color:#888">Sem campos selecionados</span>'}</div>
-        </div>`;
-      }).join('');
-
-      content.innerHTML = `
-        <div style="font-size:13px;color:#aaa;font-weight:700">ESTRUTURA ORDER SEARCH</div>
-        <div style="font-size:12px;margin-top:7px;word-break:break-all"><b>Array:</b> ${esc(shape.arrayPath || '—')} · ${esc(shape.arrayLength ?? '—')} itens</div>
-        <div style="font-size:12px;margin-top:4px;word-break:break-all"><b>Top keys:</b> ${esc((shape.topKeys || []).join(', '))}</div>
-        <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Campos relevantes:</b></div>
-        <div style="font-size:11px;max-height:180px;overflow:auto;margin-top:4px">${hintRows || '—'}</div>
-        <div style="font-size:12px;color:#aaa;margin-top:10px"><b>Amostras de pedido:</b></div>
-        <div style="font-size:11px;max-height:280px;overflow:auto">${sampleRows || '—'}</div>
-        ${renderLearnedStatusMap()}`;
-      return true;
+  function getBrScan() {
+    try {
+      const raw = localStorage.getItem(BR_SCAN_KEY);
+      const value = raw ? JSON.parse(raw) : [];
+      return Array.isArray(value) ? value : [];
+    } catch {
+      return [];
     }
+  }
 
-    if (diag) {
-      content.innerHTML = `
-        <div style="font-size:13px;color:#aaa;font-weight:700">DIAGNÓSTICO CAPTURADO</div>
-        <div style="font-size:15px;margin-top:8px"><b>Método:</b> ${esc(diag.method || '—')}</div>
-        <div style="font-size:13px;margin-top:6px;word-break:break-all"><b>URL:</b> ${esc(diag.url || '—')}</div>
-        <div style="font-size:15px;margin-top:8px"><b>AT:</b> ${esc(diag.at || '—')}</div>`;
-      return true;
-    }
+  function accordion(title, body, open = false) {
+    return `
+      <details ${open ? 'open' : ''} style="border:1px solid #2f2f2f;border-radius:7px;margin-bottom:7px;background:#111">
+        <summary style="cursor:pointer;padding:9px 10px;font-size:12px;font-weight:800;color:#ff8a33;user-select:none">
+          ${esc(title)}
+        </summary>
+        <div style="padding:8px 10px;border-top:1px solid #2f2f2f;font-size:11px;max-height:260px;overflow:auto">
+          ${body || '<span style="color:#888">Sem dados</span>'}
+        </div>
+      </details>`;
+  }
 
-    const rows = candidates.slice(0, 8).map((item, index) => {
+  function renderBrScanSection() {
+    const items = getBrScan();
+    if (!items.length) return '<span style="color:#888">Nenhuma requisição da visualização individual capturada ainda.</span>';
+
+    return items.slice(0, 10).map((item, index) => {
       let path = item.url || '';
       try {
         const u = new URL(path, location.href);
         path = u.pathname + u.search;
       } catch {}
+
+      const hints = (item.hints || []).slice(0, 12).map(h =>
+        `<div style="padding:2px 0"><b>${esc(h.path)}</b>: ${esc(h.value)}</div>`
+      ).join('');
+
       return `
-        <div style="padding:8px 0;border-bottom:1px solid #333">
-          <div style="font-size:12px;color:#ff8a33;font-weight:800">#${index + 1} ${esc(item.method || 'GET')} · ${esc(item.size || 0)} bytes</div>
-          <div style="font-size:12px;margin-top:3px;word-break:break-all">${esc(path)}</div>
+        <div style="padding:6px 0;border-bottom:1px solid #292929">
+          <div style="font-weight:800;color:#ddd">#${index + 1} ${esc(item.method)} · ${esc(item.size)} bytes</div>
+          <div style="margin-top:3px;word-break:break-all;color:#bbb">${esc(path)}</div>
+          <div style="margin-top:3px;color:#999">BR: ${item.hasCurrentBr ? 'sim' : 'não'} · Return_LMHub_Onhold: ${item.hasReturnOnhold ? 'sim' : 'não'}</div>
+          ${hints ? `<div style="margin-top:5px">${hints}</div>` : ''}
         </div>`;
     }).join('');
+  }
+
+  function renderDiagnosticSummary() {
+    const shape = getOrderShape();
+    const diag = getSavedDiagnostic();
+    const candidates = getDiagnosticCandidates();
+    const brScan = getBrScan();
+    const statusScan = getStatusScan();
+    const map = getStatusMap();
+
+    if (!shape && !diag && !candidates.length && !brScan.length && !statusScan) return false;
+
+    diagnosticView = true;
+    lastRenderSignature = '';
+
+    const panel = ensurePanel();
+    const content = panel.querySelector('[data-content]');
+    panel.style.display = panelOpen ? 'block' : 'none';
+
+    const summaryBody = `
+      <div><b>BR:</b> ${esc(lastTracking || '—')}</div>
+      <div><b>AT:</b> ${esc(lastDriverData?.assignmentId || statusScan?.assignmentId || '—')}</div>
+      <div><b>Motorista:</b> ${esc(lastDriverData?.driver?.name || '—')}</div>
+      <div><b>Versão:</b> ${esc(MODULE_VERSION)}</div>`;
+
+    let orderBody = '<span style="color:#888">Sem captura do Order Search.</span>';
+    if (shape) {
+      const hints = (shape.hints || []).slice(0, 18).map(item =>
+        `<div style="padding:2px 0"><b>${esc(item.path)}</b>: ${esc(item.value)}</div>`
+      ).join('');
+      orderBody = `
+        <div><b>Array:</b> ${esc(shape.arrayPath || '—')} · ${esc(shape.arrayLength ?? '—')} itens</div>
+        <div style="margin-top:5px">${hints}</div>`;
+    }
+
+    const mapBody = Object.entries(map).map(([code, label]) =>
+      `<div style="padding:3px 0"><b>Status ${esc(code)}</b> = ${esc(label)}</div>`
+    ).join('') || '<span style="color:#888">Sem mapa aprendido.</span>';
+
+    let statusBody = '<span style="color:#888">Sem varredura da AT.</span>';
+    if (statusScan?.byStatus) {
+      const rows = Object.entries(statusScan.byStatus)
+        .sort((a,b) => Number(a[0]) - Number(b[0]))
+        .map(([code, info]) =>
+          `<div style="padding:3px 0"><b>Status ${esc(code)}</b>: ${esc(info.count)} · ${esc(info.sampleShipment || '—')}</div>`
+        ).join('');
+      statusBody = `
+        <div><b>Total API:</b> ${esc(statusScan.total ?? '—')}</div>
+        <div><b>Ocorrências computadas:</b> ${esc(statusScan.occurrenceCount ?? '—')}</div>
+        <div style="margin-top:5px">${rows}</div>`;
+    }
+
+    let reqBody = '<span style="color:#888">Sem requisições candidatas.</span>';
+    if (candidates.length) {
+      reqBody = candidates.slice(0,6).map((item,index) => {
+        let path = item.url || '';
+        try {
+          const u = new URL(path, location.href);
+          path = u.pathname + u.search;
+        } catch {}
+        return `<div style="padding:4px 0;border-bottom:1px solid #292929"><b>#${index+1} ${esc(item.method)}</b><div style="word-break:break-all">${esc(path)}</div></div>`;
+      }).join('');
+    }
 
     content.innerHTML = `
-      <div style="font-size:13px;color:#aaa;font-weight:700">REQUISIÇÕES CANDIDATAS</div>
-      <div style="margin-top:8px;max-height:430px;overflow:auto">${rows}</div>`;
+      <div style="font-size:12px;color:#aaa;font-weight:700;margin-bottom:8px">DIAGNÓSTICO</div>
+      ${accordion('Resumo', summaryBody, true)}
+      ${accordion('Order Search', orderBody)}
+      ${accordion('Mapa de Status', mapBody)}
+      ${accordion('Status da AT', statusBody)}
+      ${accordion('Varredura do BR', renderBrScanSection())}
+      ${accordion('Requisições candidatas', reqBody)}
+    `;
+
     return true;
   }
 
@@ -1243,6 +1340,7 @@
       localStorage.removeItem(ORDER_ITEMS_KEY);
       localStorage.removeItem(STATUS_SCAN_KEY);
       localStorage.removeItem(ONHOLD_DETAIL_KEY);
+      localStorage.removeItem(BR_SCAN_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
