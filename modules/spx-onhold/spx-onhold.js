@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.5';
+  const MODULE_VERSION = '0.2.6';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -41,6 +41,7 @@
   const ORDER_ITEMS_KEY = 'spx-onhold-order-items-v1';
   const STATUS_MAP_KEY = 'spx-onhold-status-map-v1';
   const STATUS_SCAN_KEY = 'spx-onhold-status-scan-v1';
+  const ONHOLD_DETAIL_KEY = 'spx-onhold-detail-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -729,6 +730,88 @@
     return out;
   }
 
+  function formatOccurrenceDate(timestamp) {
+    if (!Number(timestamp)) return '—';
+    try {
+      return new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        dateStyle: 'short',
+        timeStyle: 'short'
+      }).format(new Date(Number(timestamp) * 1000));
+    } catch {
+      return '—';
+    }
+  }
+
+  function getOnHoldDetail() {
+    try {
+      const raw = localStorage.getItem(ONHOLD_DETAIL_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchOnHoldDetails(assignmentId, shipments) {
+    if (!assignmentId || !Array.isArray(shipments)) return;
+
+    const unique = [...new Set(shipments.map(String).filter(Boolean))];
+    const existing = getOnHoldDetail();
+    if (existing?.assignmentId === assignmentId &&
+        Date.now() - Number(existing.savedAt || 0) < 60000 &&
+        Array.isArray(existing.items) &&
+        existing.items.length === unique.length) {
+      return existing;
+    }
+
+    const items = [];
+
+    for (const shipmentId of unique) {
+      try {
+        const url = '/api/fleet_order/order/detail/recipient_info'
+          + '?shipment_id=' + encodeURIComponent(shipmentId)
+          + '&station_type=3';
+
+        const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) continue;
+
+        const parsed = await response.json();
+        const attempts = Array.isArray(parsed?.data?.recipient?.On_Hold)
+          ? parsed.data.recipient.On_Hold.filter(Boolean)
+          : [];
+
+        const ordered = [...attempts].sort((a, b) => Number(a?.ctime || 0) - Number(b?.ctime || 0));
+        const latest = ordered.at(-1) || null;
+
+        items.push({
+          shipmentId,
+          latestCtime: Number(latest?.ctime || 0),
+          latestReason: String(latest?.on_hold_reason__desc || latest?.reason_desc || ''),
+          attempts: ordered.map(attempt => ({
+            ctime: Number(attempt?.ctime || 0),
+            reason: String(attempt?.on_hold_reason__desc || attempt?.reason_desc || '')
+          }))
+        });
+      } catch {}
+    }
+
+    const record = {
+      assignmentId,
+      savedAt: Date.now(),
+      items
+    };
+
+    try {
+      localStorage.setItem(ONHOLD_DETAIL_KEY, JSON.stringify(record));
+    } catch {}
+
+    if (lastDriverData?.assignmentId === assignmentId && !diagnosticView) {
+      renderDriver(lastDriverData, getStatusScan());
+    }
+
+    return record;
+  }
+
   async function scanAssignmentStatuses(assignmentId) {
     if (!assignmentId) return;
 
@@ -741,6 +824,7 @@
       let total = 0;
       const byStatus = {};
       const onHoldItems = [];
+      const onHoldShipments = [];
       let safety = 0;
 
       while (safety++ < 50) {
@@ -769,11 +853,13 @@
           byStatus[code].count += 1;
 
           if (code === '5') {
+            const shipmentId = item?.shipment_id || '';
             onHoldItems.push({
-              shipment_id: item?.shipment_id || '',
+              shipment_id: shipmentId,
               on_hold_reason: item?.on_hold_reason ?? null,
               hints: collectOnHoldTimeHints(item).slice(0, 80)
             });
+            if (shipmentId) onHoldShipments.push(shipmentId);
           }
         }
 
@@ -792,6 +878,8 @@
       };
 
       localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
+
+      void fetchOnHoldDetails(assignmentId, onHoldShipments);
 
       if (lastDriverData?.assignmentId === assignmentId && !diagnosticView) {
         renderDriver(lastDriverData, record);
@@ -837,11 +925,40 @@
     const occurrences = sameAT ? Number(scan?.byStatus?.['5']?.count || 0) : null;
     const delivering = sameAT ? Number(scan?.byStatus?.['2']?.count || 0) : null;
 
+    const detail = getOnHoldDetail();
+    const sameDetailAT = detail?.assignmentId === data.assignmentId;
+    const occurrenceItems = sameDetailAT && Array.isArray(detail?.items) ? detail.items : [];
+
+    const latestItem = [...occurrenceItems]
+      .filter(item => Number(item?.latestCtime || 0) > 0)
+      .sort((a, b) => Number(b.latestCtime) - Number(a.latestCtime))[0] || null;
+
     const occurrenceText = occurrences === null ? '...' : String(occurrences);
     const deliveringText = delivering === null ? '...' : String(delivering);
+    const latestText = occurrences === null
+      ? 'carregando...'
+      : occurrences === 0
+        ? '—'
+        : latestItem
+          ? formatOccurrenceDate(latestItem.latestCtime)
+          : 'carregando horários...';
 
-    const details = sameAT && occurrences > 0
-      ? '<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ccc">Horários em identificação...</div>'
+    const detailsHtml = occurrenceItems
+      .sort((a, b) => Number(b.latestCtime || 0) - Number(a.latestCtime || 0))
+      .map(item => {
+        const reason = item.latestReason ? `<div style="color:#9ca3af;margin-top:2px">${esc(item.latestReason)}</div>` : '';
+        return `
+          <div style="padding:7px 0;border-bottom:1px solid #2b2b2b">
+            <div style="font-weight:800">${esc(item.shipmentId)}</div>
+            <div>${esc(formatOccurrenceDate(item.latestCtime))}</div>
+            ${reason}
+          </div>`;
+      }).join('');
+
+    const details = occurrences > 0
+      ? `<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
+           ${detailsHtml || '<div>Carregando ocorrências...</div>'}
+         </div>`
       : '';
 
     setContent(
@@ -854,10 +971,10 @@
          <b>Ocorrências:</b> ${esc(occurrenceText)}
          ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
        </div>
-       <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${occurrences > 0 ? 'identificando horário...' : '—'}</div>
+       <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        <div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${occurrenceText}:${deliveringText}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
     );
 
     const panel = ensurePanel();
@@ -976,6 +1093,7 @@
       localStorage.removeItem(ORDER_SHAPE_KEY);
       localStorage.removeItem(ORDER_ITEMS_KEY);
       localStorage.removeItem(STATUS_SCAN_KEY);
+      localStorage.removeItem(ONHOLD_DETAIL_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
