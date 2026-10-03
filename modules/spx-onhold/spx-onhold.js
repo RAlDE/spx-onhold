@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.3';
+  const MODULE_VERSION = '0.2.4';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -39,6 +39,7 @@
   const ORDER_SHAPE_KEY = 'spx-onhold-order-shape-v1';
   const ORDER_ITEMS_KEY = 'spx-onhold-order-items-v1';
   const STATUS_MAP_KEY = 'spx-onhold-status-map-v1';
+  const STATUS_SCAN_KEY = 'spx-onhold-status-scan-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -601,6 +602,7 @@
         <div style="font-size:12px;color:#aaa;font-weight:700">MAPA APRENDIDO</div>
         <div style="font-size:12px;margin-top:4px">${mappings || 'Ainda não identificado'}</div>
         ${timeRows ? `<div style="font-size:12px;color:#aaa;margin-top:8px"><b>Datas dos OnHold:</b></div><div style="font-size:11px">${timeRows}</div>` : ''}
+        ${renderStatusScan()}
       </div>`;
   }
 
@@ -673,7 +675,100 @@
     return true;
   }
 
+  function getStatusScan() {
+    try {
+      const raw = localStorage.getItem(STATUS_SCAN_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function scanAssignmentStatuses(assignmentId) {
+    if (!assignmentId) return;
+
+    try {
+      const existing = getStatusScan();
+      if (existing?.assignmentId === assignmentId && Date.now() - existing.savedAt < 60000) return;
+
+      const count = 24;
+      let page = 1;
+      let total = 0;
+      const byStatus = {};
+      let safety = 0;
+
+      while (safety++ < 50) {
+        const url = '/spx_delivery/admin/assignment/assignment_task/detail/order/search'
+          + '?assignment_task_id=' + encodeURIComponent(assignmentId)
+          + '&pageno=' + page
+          + '&count=' + count;
+
+        const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
+        if (!response.ok) break;
+
+        const parsed = await response.json();
+        const list = Array.isArray(parsed?.data?.list) ? parsed.data.list : [];
+        total = Number(parsed?.data?.total || total || 0);
+
+        for (const item of list) {
+          const code = String(item?.status ?? '');
+          if (!code) continue;
+          if (!byStatus[code]) {
+            byStatus[code] = {
+              count: 0,
+              sampleShipment: item?.shipment_id || '',
+              onHoldReason: item?.on_hold_reason ?? null
+            };
+          }
+          byStatus[code].count += 1;
+        }
+
+        if (!list.length) break;
+        if (page * count >= total) break;
+        page += 1;
+      }
+
+      const record = {
+        assignmentId,
+        savedAt: Date.now(),
+        total,
+        pagesRead: page,
+        byStatus
+      };
+
+      localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
+      showDiagnosticToast('SPX OnHold: todos os status da AT foram analisados.');
+    } catch (error) {
+      console.warn('[SPX OnHold] Falha ao analisar status da AT', error);
+    }
+  }
+
+  function renderStatusScan() {
+    const scan = getStatusScan();
+    if (!scan?.byStatus) return '';
+
+    const map = getStatusMap();
+    const rows = Object.entries(scan.byStatus)
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([code, info]) => {
+        const label = map[code] || 'Não identificado';
+        return `
+          <div style="padding:5px 0;border-bottom:1px solid #2c2c2c">
+            <b>Status ${esc(code)}</b> = ${esc(label)}
+            <div style="font-size:11px;color:#aaa">Quantidade: ${esc(info.count)} · Exemplo: ${esc(info.sampleShipment || '—')}</div>
+          </div>`;
+      }).join('');
+
+    return `
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #444">
+        <div style="font-size:12px;color:#aaa;font-weight:700">STATUS DE TODA A AT</div>
+        <div style="font-size:11px;color:#888;margin-top:3px">Total API: ${esc(scan.total ?? '—')}</div>
+        <div style="font-size:12px;margin-top:5px">${rows || 'Nenhum status encontrado'}</div>
+      </div>`;
+  }
+
   function renderDriver(data) {
+    scanAssignmentStatuses(data.assignmentId);
     if (diagnosticView) return;
     setContent(
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
@@ -790,6 +885,7 @@
       localStorage.removeItem(DIAG_CANDIDATES_KEY);
       localStorage.removeItem(ORDER_SHAPE_KEY);
       localStorage.removeItem(ORDER_ITEMS_KEY);
+      localStorage.removeItem(STATUS_SCAN_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
