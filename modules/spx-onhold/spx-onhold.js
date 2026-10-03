@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.1.3';
+  const MODULE_VERSION = '0.1.4';
 
   let lastTracking = '';
   let panelOpen = true;
@@ -102,43 +102,56 @@
     return m ? { id: m[1], name: m[2].trim() } : { id: '', name: raw };
   }
 
-  function findAssignmentResult() {
-    const tables = [...document.querySelectorAll('table')];
-    for (const table of tables) {
-      const headers = getHeaders(table);
-      const driverIndex = headers.findIndex(h => /^motorista$/.test(h) || (/motorista/.test(h) && !/estação|estacao/.test(h)) || /^driver$/.test(h));
-      const actionIndex = headers.findIndex(h => /ação|acao|action/.test(h));
+  function findVisibleATElement() {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = (node.nodeValue || '').trim();
+      if (!/^AT[A-Z0-9]+$/i.test(text)) continue;
+      const el = node.parentElement;
+      if (el && el.offsetParent !== null) return el;
+    }
+    return null;
+  }
 
-      const rows = [...table.querySelectorAll('tbody tr')]
-        .filter(row => row.offsetParent !== null && row.querySelectorAll('td').length > 0);
+  function findRowLikeContainer(el) {
+    if (!el) return null;
+    const directRow = el.closest('tr,[role="row"]');
+    if (directRow) return directRow;
 
-      for (const row of rows) {
-        const cells = [...row.querySelectorAll('td')];
-        let driverText = '';
-
-        if (driverIndex >= 0 && cells[driverIndex]) {
-          driverText = cells[driverIndex].innerText || '';
-        }
-
-        if (!/\[\d+\]/.test(driverText)) {
-          driverText = (row.innerText.match(/\[\d+\]\s*[^\n]+/) || [])[0] || driverText;
-        }
-
-        const driver = parseDriver(driverText);
-        if (!driver.name) continue;
-
-        const link = actionIndex >= 0 ? cells[actionIndex]?.querySelector('a') : row.querySelector('a');
-        const assignmentId = (row.innerText.match(/AT[A-Z0-9]+/i) || [])[0] || '';
-
-        return {
-          tracking: lastTracking,
-          driver,
-          assignmentId,
-          detailHref: link?.href || ''
-        };
+    let node = el;
+    for (let i = 0; node && i < 8; i++, node = node.parentElement) {
+      const text = (node.innerText || '').trim();
+      if (/AT[A-Z0-9]+/i.test(text) && /\[\d+\]/.test(text) && /visualizar/i.test(text)) {
+        return node;
       }
     }
     return null;
+  }
+
+  function findAssignmentResult() {
+    const atElement = findVisibleATElement();
+    if (!atElement) return null;
+
+    const row = findRowLikeContainer(atElement);
+    const rowText = (row?.innerText || atElement.parentElement?.innerText || '').trim();
+    const assignmentId = (rowText.match(/AT[A-Z0-9]+/i) || [atElement.innerText || ''])[0] || '';
+    const driverMatch = rowText.match(/\[(\d+)\]\s*([^\n]+)/);
+    const driver = driverMatch
+      ? { id: driverMatch[1], name: driverMatch[2].trim() }
+      : { id: '', name: '' };
+
+    let detailHref = '';
+    const link = row?.querySelector('a');
+    if (link) detailHref = link.href || '';
+
+    return {
+      tracking: lastTracking,
+      driver,
+      assignmentId,
+      detailHref,
+      row
+    };
   }
 
   function render(data) {
@@ -148,9 +161,14 @@
     panel.style.display = panelOpen ? 'block' : 'none';
 
     if (!data?.driver?.name) {
-      content.innerHTML = lastTracking
-        ? `<div style="font-size:13px;color:#aaa;font-weight:700">BR DETECTADO</div><div style="font-size:18px;font-weight:800;margin-top:3px">${esc(lastTracking)}</div><div style="margin-top:10px;font-size:15px;color:#aaa">Aguardando retorno da tabela…</div>`
-        : '<b style="font-size:18px">Sem informação</b>';
+      const at = data?.assignmentId || '';
+      if (at) {
+        content.innerHTML = `<div style="font-size:13px;color:#aaa;font-weight:700">AT DETECTADA</div><div style="font-size:18px;font-weight:800;margin-top:3px">${esc(at)}</div><div style="margin-top:10px;font-size:15px;color:#aaa">Aguardando dados do motorista…</div>`;
+      } else if (lastTracking) {
+        content.innerHTML = `<div style="font-size:13px;color:#aaa;font-weight:700">BR DETECTADO</div><div style="font-size:18px;font-weight:800;margin-top:3px">${esc(lastTracking)}</div><div style="margin-top:10px;font-size:15px;color:#aaa">Aguardando AT…</div>`;
+      } else {
+        content.innerHTML = '<b style="font-size:18px">Sem informação</b>';
+      }
       return;
     }
 
@@ -261,7 +279,7 @@
     setInterval(() => {
       if (!isTargetPage()) return;
       const result = findAssignmentResult();
-      if (result?.driver?.name) {
+      if (result?.assignmentId) {
         render(result);
       }
     }, 500);
@@ -274,7 +292,7 @@
     bindInput();
     if (lastTracking) {
       const result = findAssignmentResult();
-      if (result?.driver?.name) render(result);
+      if (result?.assignmentId) render(result);
     }
   });
 
