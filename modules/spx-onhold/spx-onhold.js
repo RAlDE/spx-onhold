@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.6';
+  const MODULE_VERSION = '0.3.7';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -386,7 +386,7 @@
       localStorage.setItem(BR_SCAN_KEY, JSON.stringify(list));
 
       if (hasReturnOnhold) {
-        showDiagnosticToast('SPX OnHold: Return_LMHub_Onhold encontrado na varredura.');
+
       }
     } catch {}
   }
