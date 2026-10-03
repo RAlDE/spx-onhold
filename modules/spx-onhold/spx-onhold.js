@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.4';
+  const MODULE_VERSION = '0.3.5';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -232,7 +232,7 @@
   }
 
   function getStatusMap() {
-    const known = { '2': 'Delivering', '4': 'Delivered', '5': 'OnHold' };
+    const known = { '2': 'Delivering', '4': 'Delivered', '5': 'OnHold', '10': 'Return_LMHub_Onhold' };
     try {
       const raw = localStorage.getItem(STATUS_MAP_KEY);
       const value = raw ? JSON.parse(raw) : {};
@@ -913,6 +913,54 @@
     }
   }
 
+  function collectTrackingNodes(nodes, output = []) {
+    if (!Array.isArray(nodes)) return output;
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object') continue;
+      output.push(node);
+      collectTrackingNodes(node.children, output);
+      collectTrackingNodes(node.event_children, output);
+    }
+    return output;
+  }
+
+  function extractReturnLmHubEvent(tracking) {
+    const nodes = collectTrackingNodes(tracking?.data?.tracking_list);
+    const matches = nodes.filter(node => {
+      const text = [
+        node?.status,
+        node?.state,
+        node?.event_code,
+        node?.event_name,
+        node?.title,
+        node?.message,
+        node?.description
+      ].filter(Boolean).join(' ');
+      return /retorno[_\s-]*lmhub[_\s-]*em[_\s-]*espera/i.test(text)
+        || /return[_\s-]*lmhub[_\s-]*onhold/i.test(text);
+    });
+
+    const latest = matches
+      .sort((a,b) => Number(b?.timestamp || b?.ctime || 0) - Number(a?.timestamp || a?.ctime || 0))[0];
+
+    if (!latest) return null;
+
+    const rawText = [
+      latest?.message,
+      latest?.description,
+      latest?.title
+    ].filter(Boolean).join(' ');
+
+    let reason = '';
+    const paren = rawText.match(/\(([^)]+)\)/);
+    if (paren?.[1]) reason = paren[1].trim();
+
+    return {
+      ctime: Number(latest?.timestamp || latest?.ctime || 0),
+      reason: translateReason(reason || rawText)
+    };
+  }
+
   async function fetchOnHoldDetails(assignmentId, shipments) {
     if (!assignmentId || !Array.isArray(shipments)) return;
 
@@ -942,12 +990,32 @@
           : [];
 
         const ordered = [...attempts].sort((a, b) => Number(a?.ctime || 0) - Number(b?.ctime || 0));
-        const latest = ordered.at(-1) || null;
+        let latest = ordered.at(-1) || null;
+        let latestCtime = Number(latest?.ctime || 0);
+        let latestReason = translateReason(latest?.on_hold_reason__desc || latest?.reason_desc || '');
+
+        // Return_LMHub_Onhold pode não aparecer em recipient.On_Hold.
+        // Nesse caso usamos o rastreio individual e o evento Retorno_LMHub_Em_Espera.
+        if (!latestCtime || !latestReason) {
+          try {
+            const trackingUrl = '/api/fleet_order/order/detail/tracking_info?shipment_id='
+              + encodeURIComponent(shipmentId);
+            const trackingResponse = await fetch(trackingUrl, { credentials: 'include', cache: 'no-store' });
+            if (trackingResponse.ok) {
+              const tracking = await trackingResponse.json();
+              const returnEvent = extractReturnLmHubEvent(tracking);
+              if (returnEvent) {
+                if (!latestCtime) latestCtime = Number(returnEvent.ctime || 0);
+                if (!latestReason) latestReason = returnEvent.reason || 'Return_LMHub_Onhold';
+              }
+            }
+          } catch {}
+        }
 
         items.push({
           shipmentId,
-          latestCtime: Number(latest?.ctime || 0),
-          latestReason: translateReason(latest?.on_hold_reason__desc || latest?.reason_desc || ''),
+          latestCtime,
+          latestReason,
           attempts: ordered.map(attempt => ({
             ctime: Number(attempt?.ctime || 0),
             reason: translateReason(attempt?.on_hold_reason__desc || attempt?.reason_desc || '')
@@ -1057,7 +1125,7 @@
             searchedItemStatusCode = code;
           }
 
-          const countsAsOccurrence = code === '5' || isReturnLmHubOnhold(item);
+          const countsAsOccurrence = code === '5' || code === '10' || isReturnLmHubOnhold(item);
           if (countsAsOccurrence) {
             occurrenceCount += 1;
             onHoldItems.push({
@@ -1081,7 +1149,11 @@
       const searchedReturnOnhold = await searchedBrIsReturnOnhold(lastTracking);
       let returnOnholdStatusCode = '';
 
-      if (searchedReturnOnhold && searchedItemStatusCode) {
+      if (searchedItemStatusCode === '10') {
+        returnOnholdStatusCode = '10';
+      }
+
+      if ((searchedReturnOnhold || searchedItemStatusCode === '10') && searchedItemStatusCode) {
         returnOnholdStatusCode = searchedItemStatusCode;
 
         const mapped = getStatusMap();
