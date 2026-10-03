@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.2.0';
+  const MODULE_VERSION = '0.2.1';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -35,6 +35,7 @@
   }
 
   const DIAG_KEY = 'spx-onhold-network-source-v1';
+  const DIAG_CANDIDATES_KEY = 'spx-onhold-network-candidates-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -83,7 +84,44 @@
     return out;
   }
 
+  function saveDiagnosticCandidate(meta, parsed, rawText) {
+    try {
+      const urlText = String(meta.url || '');
+      const url = new URL(urlText, location.href);
+      if (url.origin !== location.origin) return;
+      if (/apollo\/get_config|feature|config\/by_cid|permission_tree|menu_tree|basicserver/i.test(urlText)) return;
+
+      const text = String(rawText || '');
+      const atMatch = text.match(/AT[A-Z0-9]+/i);
+      const candidate = {
+        capturedAt: new Date().toISOString(),
+        method: meta.method || 'GET',
+        url: urlText,
+        size: text.length,
+        at: atMatch ? atMatch[0] : '',
+        hasOnHoldWord: /\bOnHold\b/i.test(text),
+        hasDeliveringWord: /\bDelivering\b/i.test(text),
+        topKeys: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? Object.keys(parsed).slice(0, 12)
+          : []
+      };
+
+      let list = [];
+      try {
+        list = JSON.parse(localStorage.getItem(DIAG_CANDIDATES_KEY) || '[]');
+        if (!Array.isArray(list)) list = [];
+      } catch {}
+
+      const signature = candidate.method + '|' + candidate.url;
+      list = list.filter(item => (item.method + '|' + item.url) !== signature);
+      list.unshift(candidate);
+      list = list.slice(0, 20);
+      localStorage.setItem(DIAG_CANDIDATES_KEY, JSON.stringify(list));
+    } catch {}
+  }
+
   function saveDiagnosticSource(meta, parsed, rawText) {
+    saveDiagnosticCandidate(meta, parsed, rawText);
     const items = findStatusObjects(parsed);
     const text = String(rawText || '');
     const urlText = String(meta.url || '');
@@ -359,9 +397,21 @@
     }
   }
 
+  function getDiagnosticCandidates() {
+    try {
+      const raw = localStorage.getItem(DIAG_CANDIDATES_KEY);
+      const value = raw ? JSON.parse(raw) : [];
+      return Array.isArray(value) ? value : [];
+    } catch {
+      return [];
+    }
+  }
+
   function renderDiagnosticSummary() {
     const diag = getSavedDiagnostic();
-    if (!diag) return false;
+    const candidates = getDiagnosticCandidates();
+
+    if (!diag && !candidates.length) return false;
 
     diagnosticView = true;
     lastRenderSignature = '';
@@ -369,14 +419,36 @@
     const content = panel.querySelector('[data-content]');
     panel.style.display = panelOpen ? 'block' : 'none';
 
+    if (diag) {
+      content.innerHTML = `
+        <div style="font-size:13px;color:#aaa;font-weight:700">DIAGNÓSTICO CAPTURADO</div>
+        <div style="font-size:15px;margin-top:8px"><b>Método:</b> ${esc(diag.method || '—')}</div>
+        <div style="font-size:13px;margin-top:6px;word-break:break-all"><b>URL:</b> ${esc(diag.url || '—')}</div>
+        <div style="font-size:15px;margin-top:8px"><b>AT:</b> ${esc(diag.at || '—')}</div>
+        <div style="font-size:15px;margin-top:6px"><b>OnHold encontrados:</b> ${esc(diag.onHoldInResponse ?? '—')}</div>
+        <div style="font-size:15px;margin-top:4px"><b>Delivering encontrados:</b> ${esc(diag.deliveringInResponse ?? '—')}</div>`;
+      return true;
+    }
+
+    const rows = candidates.slice(0, 8).map((item, index) => {
+      let path = item.url || '';
+      try {
+        const u = new URL(path, location.href);
+        path = u.pathname + u.search;
+      } catch {}
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid #333">
+          <div style="font-size:12px;color:#ff8a33;font-weight:800">#${index + 1} ${esc(item.method || 'GET')} · ${esc(item.size || 0)} bytes</div>
+          <div style="font-size:12px;margin-top:3px;word-break:break-all">${esc(path)}</div>
+          <div style="font-size:11px;color:#999;margin-top:3px">AT: ${esc(item.at || '—')} · OnHold: ${item.hasOnHoldWord ? 'sim' : 'não'} · Delivering: ${item.hasDeliveringWord ? 'sim' : 'não'}</div>
+        </div>`;
+    }).join('');
+
     content.innerHTML = `
-      <div style="font-size:13px;color:#aaa;font-weight:700">DIAGNÓSTICO CAPTURADO</div>
-      <div style="font-size:15px;margin-top:8px"><b>Método:</b> ${esc(diag.method || '—')}</div>
-      <div style="font-size:13px;margin-top:6px;word-break:break-all"><b>URL:</b> ${esc(diag.url || '—')}</div>
-      <div style="font-size:15px;margin-top:8px"><b>AT:</b> ${esc(diag.at || '—')}</div>
-      <div style="font-size:15px;margin-top:6px"><b>OnHold encontrados:</b> ${esc(diag.onHoldInResponse ?? '—')}</div>
-      <div style="font-size:15px;margin-top:4px"><b>Delivering encontrados:</b> ${esc(diag.deliveringInResponse ?? '—')}</div>
-      <div style="font-size:12px;color:#999;margin-top:10px">Envie uma foto desta caixa para eu ligar a consulta automática.</div>`;
+      <div style="font-size:13px;color:#aaa;font-weight:700">REQUISIÇÕES CANDIDATAS</div>
+      <div style="font-size:12px;color:#999;margin-top:5px">Últimas respostas JSON do SPX após abrir a AT.</div>
+      <div style="margin-top:8px;max-height:430px;overflow:auto">${rows}</div>
+      <div style="font-size:12px;color:#999;margin-top:10px">Envie uma foto desta lista.</div>`;
     return true;
   }
 
@@ -492,6 +564,10 @@
 
     lastTracking = value;
     activeSearchUntil = Date.now() + 6000;
+    try {
+      localStorage.removeItem(DIAG_KEY);
+      localStorage.removeItem(DIAG_CANDIDATES_KEY);
+    } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
   }
