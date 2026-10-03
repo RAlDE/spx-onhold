@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.1.9';
+  const MODULE_VERSION = '0.2.0';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -86,7 +86,15 @@
   function saveDiagnosticSource(meta, parsed, rawText) {
     const items = findStatusObjects(parsed);
     const text = String(rawText || '');
-    if (!items.length && !/\bOnHold\b|\bDelivering\b/i.test(text)) return;
+    const urlText = String(meta.url || '');
+
+    // Ignora endpoints de configuração/feature flags, que podem conter
+    // palavras como "onhold" apenas no nome das chaves.
+    if (/apollo\/get_config|feature|config\/by_cid/i.test(urlText)) return;
+
+    // Só aceitamos uma resposta quando encontramos objetos estruturados
+    // cujo campo de status realmente tenha valor OnHold ou Delivering.
+    if (!items.length) return;
 
     const atMatch = text.match(/AT[A-Z0-9]+/i);
     const record = {
@@ -114,11 +122,20 @@
 
       const clone = response.clone();
       const text = await clone.text();
-      if (!text || (!/OnHold|Delivering/i.test(text))) return;
+      if (!text) return;
 
       let parsed = null;
-      try { parsed = JSON.parse(text); } catch {}
+      try { parsed = JSON.parse(text); } catch { return; }
       saveDiagnosticSource(meta, parsed, text);
+    } catch {}
+  }
+
+  function clearOldDiagnostic() {
+    try {
+      const current = JSON.parse(localStorage.getItem(DIAG_KEY) || 'null');
+      if (current?.url && /apollo\/get_config|feature|config\/by_cid/i.test(current.url)) {
+        localStorage.removeItem(DIAG_KEY);
+      }
     } catch {}
   }
 
@@ -166,7 +183,7 @@
             try { parsed = JSON.parse(text); } catch {}
           }
 
-          if (/OnHold|Delivering/i.test(text)) {
+          if (parsed) {
             saveDiagnosticSource(meta, parsed, text);
           }
         } catch {}
@@ -574,6 +591,7 @@
     }
   }
 
+  clearOldDiagnostic();
   installNetworkDiagnostic();
   enableTrackingInputCapture();
   enableScannerCapture();
