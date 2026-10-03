@@ -11,6 +11,8 @@
   let lastTracking = '';
   let panelOpen = true;
   let refreshTimer = null;
+  let scanBuffer = '';
+  let scanLastKeyAt = 0;
 
   const isTargetPage = () => location.hash.includes(ROUTE_FRAGMENT) || location.pathname.includes(ROUTE_FRAGMENT);
 
@@ -135,7 +137,9 @@
     panel.style.display = panelOpen ? 'block' : 'none';
 
     if (!data?.driver?.name) {
-      content.innerHTML = '<b style="font-size:18px">Sem informação</b>';
+      content.innerHTML = lastTracking
+        ? `<div style="font-size:13px;color:#aaa;font-weight:700">BR DETECTADO</div><div style="font-size:18px;font-weight:800;margin-top:3px">${esc(lastTracking)}</div><div style="margin-top:10px;font-size:15px;color:#aaa">Aguardando retorno da tabela…</div>`
+        : '<b style="font-size:18px">Sem informação</b>';
       return;
     }
 
@@ -183,13 +187,17 @@
   }
 
   function processTracking(tracking) {
-    const value = String(tracking || '').trim();
+    const value = String(tracking || '').trim().toUpperCase();
     if (!looksLikeTracking(value)) return;
     lastTracking = value;
     render(null);
-    scheduleRead(400);
-    setTimeout(() => scheduleRead(0), 900);
-    setTimeout(() => scheduleRead(0), 1600);
+
+    [250, 600, 1000, 1600, 2400, 3500].forEach(delay => {
+      setTimeout(() => {
+        const result = findAssignmentResult();
+        if (result?.driver?.name) render(result);
+      }, delay);
+    });
   }
 
   function bindInput() {
@@ -211,6 +219,33 @@
     }
   }
 
+  function enableScannerCapture() {
+    document.addEventListener('keydown', event => {
+      if (!isTargetPage()) return;
+
+      const now = Date.now();
+      if (now - scanLastKeyAt > 120) scanBuffer = '';
+      scanLastKeyAt = now;
+
+      if (event.key === 'Enter') {
+        const candidate = scanBuffer.trim().toUpperCase();
+        scanBuffer = '';
+        if (looksLikeTracking(candidate)) {
+          processTracking(candidate);
+        } else {
+          const input = detectTrackingInput();
+          if (input && looksLikeTracking(input.value)) processTracking(input.value);
+        }
+        return;
+      }
+
+      if (event.key && event.key.length === 1) {
+        scanBuffer += event.key;
+        if (scanBuffer.length > 40) scanBuffer = scanBuffer.slice(-40);
+      }
+    }, true);
+  }
+
   const observer = new MutationObserver(() => {
     if (!isTargetPage()) return;
     ensureToggle();
@@ -223,6 +258,7 @@
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  enableScannerCapture();
 
   if (isTargetPage()) {
     ensureToggle();
