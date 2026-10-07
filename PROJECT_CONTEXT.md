@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.10
+Versão atual do módulo: 0.3.11
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -94,7 +94,8 @@ A ideia é permitir depuração sem poluir a interface principal.
 - 0.3.7: removido toast de detecção de Return_LMHub_Onhold.
 - 0.3.8: removido toast de códigos de status.
 - 0.3.9: primeira tentativa de exibir dia de "Em entrega" ao lado da AT. No teste com AT20261006APVS7 o dia não apareceu.
-- 0.3.10: leitura mais abrangente de eventos e campos de tempo do tracking_info para localizar "Em entrega". Continua sem inventar dia quando não consegue identificar o evento com segurança. Pendente validar com pacote real.
+- 0.3.10: ampliada a busca de eventos "Em entrega", mas o dia ainda não apareceu no teste real.
+- 0.3.11: corrigido o clique/estado da seta de ocorrências com listener delegado, preservação do estado aberto durante atualizações e rolagem interna. Dia da rota segue pendente de identificar o campo exato na resposta real da SPX.
 
 ## Cuidados para futuras alterações
 - Este projeto é independente do SPX-DV.
