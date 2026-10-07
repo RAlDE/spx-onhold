@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.15';
+  const MODULE_VERSION = '0.3.16';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1299,11 +1299,7 @@
     const candidates = collectAllTrackingObjects(tracking).map((node, index) => {
       const text = primitiveText(node);
       const normalized = norm(text);
-      const isDelivering =
-        /(^|\s)em entrega(\s|$)/.test(normalized) ||
-        normalized.includes('em processo de entrega') ||
-        /(^|\s)delivering(\s|$)/.test(normalized) ||
-        normalized.includes('out for delivery');
+      const isDelivering = /(^|\s)delivering(\s|$)/.test(normalized);
       if (!isDelivering) return null;
 
       const timestamp = eventTimestamp(node);
