@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.22
+Versão atual do módulo: 0.3.23
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -136,3 +136,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.22: o cálculo do Dia da rota passou a fazer varredura de todos os objetos retornados por tracking_info. Não depende mais da palavra literal Delivering. Considera como Delivering tanto valor textual 'Delivering' quanto código interno 2 quando presente em campos de status/state. Entre todos os eventos candidatos, usa o maior horário válido e converte para o dia da semana em America/Sao_Paulo. Não usa AT, motorista, ocorrências ou seta para esse cálculo. A lógica da seta/ocorrências não foi alterada. Teste local com múltiplos eventos confirmou seleção do status 2 mais recente.
+
+
+- 0.3.23: mantém a regra da 0.3.22 e passa a exibir também a hora do mesmo evento mais recente identificado como Delivering. Exibição: `Dia da rota: <dia-da-semana> — HH:mm`, sempre em America/Sao_Paulo. Objetivo: permitir conferir visualmente se o horário usado pelo OnHold corresponde ao histórico real do BR. Nenhuma alteração feita na seta ou na lógica das ocorrências.
