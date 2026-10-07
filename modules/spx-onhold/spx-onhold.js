@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.17';
+  const MODULE_VERSION = '0.3.18';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -19,7 +19,6 @@
   let lastDriverData = null;
   let preSearchAssignmentSignature = '';
   let searchStartedAt = 0;
-  let occurrenceListExpanded = false;
   const routeWeekdayCache = new Map();
   const routeWeekdayPending = new Set();
 
@@ -1245,11 +1244,20 @@
       </div>`;
   }
 
-  function routeEventTimestamp(value) {
+  function weekdayFromAssignmentId(assignmentId) {
+    const match = String(assignmentId || '').match(/^AT(\d{4})(\d{2})(\d{2})/i);
+    if (!match) return '';
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+    return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(date).toLowerCase();
+  }
+  function routeTimestamp(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'object') {
-      const nested = value?.seconds ?? value?.timestamp ?? value?.time;
-      return routeEventTimestamp(nested);
+      return routeTimestamp(value?.seconds ?? value?.timestamp ?? value?.time);
     }
     const numeric = Number(value);
     if (Number.isFinite(numeric) && numeric > 0) {
@@ -1259,106 +1267,103 @@
     return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
   }
 
-  function collectAllTrackingObjects(value, output = [], seen = new WeakSet(), depth = 0) {
+  function collectRouteObjects(value, output = [], seen = new WeakSet(), depth = 0) {
     if (!value || typeof value !== 'object' || depth > 16 || seen.has(value)) return output;
     seen.add(value);
     if (!Array.isArray(value)) output.push(value);
     for (const child of Object.values(value)) {
-      if (child && typeof child === 'object') collectAllTrackingObjects(child, output, seen, depth + 1);
+      if (child && typeof child === 'object') collectRouteObjects(child, output, seen, depth + 1);
     }
     return output;
   }
 
-  function primitiveText(object) {
-    try {
-      return JSON.stringify(object);
-    } catch {
-      return Object.values(object || {})
-        .filter(value => ['string', 'number', 'boolean'].includes(typeof value))
-        .map(String)
-        .join(' ');
-    }
-  }
-
-  function eventTimestamp(object) {
-    const direct = [
-      object?.timestamp, object?.ctime, object?.event_time, object?.create_time,
-      object?.created_at, object?.created_time, object?.event_timestamp,
-      object?.update_time, object?.time, object?.date, object?.datetime
+  function routeObjectTimestamp(node) {
+    const candidates = [
+      node?.timestamp, node?.ctime, node?.event_time, node?.create_time,
+      node?.created_at, node?.created_time, node?.event_timestamp,
+      node?.update_time, node?.time, node?.date, node?.datetime
     ];
-    for (const candidate of direct) {
-      const timestamp = routeEventTimestamp(candidate);
-      if (timestamp) return timestamp;
-    }
-    for (const value of Object.values(object || {})) {
-      if (typeof value !== 'string') continue;
-      const timestamp = routeEventTimestamp(value);
+    for (const value of candidates) {
+      const timestamp = routeTimestamp(value);
       if (timestamp) return timestamp;
     }
     return 0;
   }
 
-  function routeWeekdayFromTracking(tracking, driver) {
+  function realRouteWeekday(tracking, driver) {
     const driverId = String(driver?.id || '').trim();
     const driverName = norm(driver?.name || '');
-    const candidates = collectAllTrackingObjects(tracking).map((node, index) => {
-      const text = primitiveText(node);
-      const normalized = norm(text);
-      const isDelivering = /(^|\s)delivering(\s|$)/.test(normalized);
-      if (!isDelivering) return null;
 
-      const timestamp = eventTimestamp(node);
+    const events = collectRouteObjects(tracking).map((node, index) => {
+      let raw = '';
+      try { raw = JSON.stringify(node); }
+      catch { raw = Object.values(node || {}).map(String).join(' '); }
+
+      if (!/\bDelivering\b/i.test(raw)) return null;
+
+      const timestamp = routeObjectTimestamp(node);
       if (!timestamp) return null;
 
-      const idMatch = driverId ? text.includes('[' + driverId + ']') || text.includes(driverId) : false;
+      const normalized = norm(raw);
+      const idMatch = driverId ? raw.includes(driverId) : false;
       const nameMatch = driverName ? normalized.includes(driverName) : false;
-
       return { timestamp, idMatch, nameMatch, index };
     }).filter(Boolean);
 
-    if (!candidates.length) return '';
-
-    let selected = candidates.filter(item => item.idMatch);
-    if (!selected.length) selected = candidates.filter(item => item.nameMatch);
-    if (!selected.length && candidates.length === 1) selected = candidates;
+    if (!events.length) return '';
+    let selected = events.filter(item => item.idMatch);
+    if (!selected.length) selected = events.filter(item => item.nameMatch);
+    if (!selected.length && events.length === 1) selected = events;
     if (!selected.length) return '';
 
-    const latest = selected.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
+    const event = selected.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
     return new Intl.DateTimeFormat('pt-BR', {
       weekday: 'long',
       timeZone: 'America/Sao_Paulo'
-    }).format(new Date(latest.timestamp * 1000)).toLowerCase();
+    }).format(new Date(event.timestamp * 1000)).toLowerCase();
   }
 
-  async function fetchRouteWeekday(assignmentId, shipmentId, driver) {
+  function updateRouteDayLine(key) {
+    const panel = document.getElementById(PANEL_ID);
+    const line = panel?.querySelector('[data-route-weekday]');
+    if (!line || line.dataset.routeKey !== key) return;
+    if (!routeWeekdayCache.has(key)) {
+      line.textContent = 'Dia da rota: buscando...';
+      return;
+    }
+    const day = routeWeekdayCache.get(key);
+    line.textContent = day ? 'Dia da rota: ' + day : 'Dia da rota: não localizado';
+  }
+
+  async function fetchRealRouteWeekday(assignmentId, shipmentId, driver) {
     if (!assignmentId || !shipmentId) return;
     const key = [assignmentId, shipmentId, driver?.id || '', driver?.name || ''].join('|');
-    if (routeWeekdayCache.has(key) || routeWeekdayPending.has(key)) return;
-
+    if (routeWeekdayCache.has(key)) {
+      updateRouteDayLine(key);
+      return;
+    }
+    if (routeWeekdayPending.has(key)) return;
     routeWeekdayPending.add(key);
+    updateRouteDayLine(key);
     try {
       const response = await fetch(
         '/api/fleet_order/order/detail/tracking_info?shipment_id=' + encodeURIComponent(shipmentId),
         { credentials: 'include', cache: 'no-store' }
       );
-      if (!response.ok) return;
+      if (!response.ok) throw new Error('Rastreio indisponível');
       const tracking = await response.json();
-      routeWeekdayCache.set(key, routeWeekdayFromTracking(tracking, driver));
-
-      if (lastDriverData?.assignmentId === assignmentId && lastTracking === shipmentId && !diagnosticView) {
-        lastRenderSignature = '';
-        renderDriver(lastDriverData, getStatusScan());
-      }
+      routeWeekdayCache.set(key, realRouteWeekday(tracking, driver));
     } catch (error) {
+      routeWeekdayCache.set(key, '');
       console.warn('[SPX OnHold] Falha ao consultar dia real da rota', error);
     } finally {
       routeWeekdayPending.delete(key);
+      updateRouteDayLine(key);
     }
   }
   function renderDriver(data, scanOverride = null) {
     lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
-    void fetchRouteWeekday(data.assignmentId, lastTracking, data.driver);
     if (diagnosticView) return;
 
     const scan = scanOverride || getStatusScan();
@@ -1374,8 +1379,6 @@
       .filter(item => Number(item?.latestCtime || 0) > 0)
       .sort((a, b) => Number(b.latestCtime) - Number(a.latestCtime))[0] || null;
 
-    const routeKey = [data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|');
-    const routeWeekday = routeWeekdayCache.get(routeKey) || '';
     const occurrenceText = occurrences === null ? '...' : String(occurrences);
     const deliveringText = delivering === null ? '...' : String(delivering);
     const latestText = occurrences === null
@@ -1399,7 +1402,7 @@
       }).join('');
 
     const details = occurrences > 0
-      ? `<div data-onhold-details style="display:${occurrenceListExpanded ? 'block' : 'none'};margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
+      ? `<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
            ${detailsHtml || '<div>Carregando ocorrências...</div>'}
          </div>`
       : '';
@@ -1408,17 +1411,18 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${routeWeekday ? ' — ' + esc(routeWeekday) : ''}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
+       <div data-route-weekday data-route-key="${esc([data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|'))}" style="font-size:13px;color:#ddd;margin-top:4px">Dia da rota: buscando...</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
-         ${occurrences > 0 ? '<span style="float:right">' + (occurrenceListExpanded ? '▴' : '▾') + '</span>' : ''}
+         ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${routeWeekday}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
     );
 
     const panel = ensurePanel();
@@ -1426,12 +1430,16 @@
     const detailsEl = panel.querySelector('[data-onhold-details]');
     if (toggle && detailsEl) {
       toggle.addEventListener('click', () => {
-        occurrenceListExpanded = !occurrenceListExpanded;
-        detailsEl.style.display = occurrenceListExpanded ? 'block' : 'none';
+        const open = detailsEl.style.display !== 'none';
+        detailsEl.style.display = open ? 'none' : 'block';
         const arrow = toggle.querySelector('span');
-        if (arrow) arrow.textContent = occurrenceListExpanded ? '▴' : '▾';
+        if (arrow) arrow.textContent = open ? '▾' : '▴';
       });
     }
+
+    const routeKey = [data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|');
+    void fetchRealRouteWeekday(data.assignmentId, lastTracking, data.driver);
+    updateRouteDayLine(routeKey);
   }
 
   function getHeaderInfo(table, wanted) {
@@ -1560,7 +1568,6 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
-    occurrenceListExpanded = false;
     routeWeekdayCache.clear();
     routeWeekdayPending.clear();
     activeSearchUntil = Date.now() + 6000;
