@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.12';
+  const MODULE_VERSION = '0.3.13';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -16,7 +16,6 @@
   let scanLastKeyAt = 0;
   let lastRenderSignature = '';
   let diagnosticView = false;
-  let occurrenceListExpanded = false;
   let lastDriverData = null;
   let preSearchAssignmentSignature = '';
   let searchStartedAt = 0;
@@ -536,7 +535,7 @@
     panel = document.createElement('section');
     panel.id = PANEL_ID;
     panel.style.cssText =
-      'position:fixed;left:16px;top:140px;width:330px;max-height:calc(100vh - 155px);display:flex;flex-direction:column;z-index:2147483646;background:#080808;color:#fff;border:1px solid #ff6b00;border-radius:12px;box-shadow:0 10px 35px #0009;overflow:hidden;font-family:Arial,sans-serif';
+      'position:fixed;left:16px;top:140px;width:330px;z-index:2147483646;background:#080808;color:#fff;border:1px solid #ff6b00;border-radius:12px;box-shadow:0 10px 35px #0009;overflow:hidden;font-family:Arial,sans-serif';
 
     panel.innerHTML = `
       <div data-drag style="background:#ff6b00;color:#111;padding:12px 14px;font-size:19px;font-weight:800;cursor:move;user-select:none;display:flex;justify-content:space-between;align-items:center">
@@ -546,7 +545,7 @@
           <button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
         </span>
       </div>
-      <div data-content style="padding:15px;font-size:16px;line-height:1.45;overflow-y:auto;min-height:0;flex:1">
+      <div data-content style="padding:15px;font-size:16px;line-height:1.45">
         <b>Sem informação</b>
       </div>`;
 
@@ -576,18 +575,6 @@
       }
     });
 
-    // Listener único no painel: continua funcional após atualizações do conteúdo.
-    panel.addEventListener('click', event => {
-      const toggle = event.target.closest('[data-toggle-onhold]');
-      if (!toggle || !panel.contains(toggle)) return;
-      const details = panel.querySelector('[data-onhold-details]');
-      if (!details) return;
-      occurrenceListExpanded = !occurrenceListExpanded;
-      details.style.display = occurrenceListExpanded ? 'block' : 'none';
-      toggle.setAttribute('aria-expanded', String(occurrenceListExpanded));
-      const arrow = toggle.querySelector('[data-occurrence-arrow]');
-      if (arrow) arrow.textContent = occurrenceListExpanded ? '▴' : '▾';
-    });
     enableDragging(panel, panel.querySelector('[data-drag]'));
     restorePosition(panel);
     return panel;
@@ -1255,87 +1242,9 @@
       </div>`;
   }
 
-  const routeDayCache = new Map();
-  const routeDayPending = new Set();
-
-  function routeEventTimestamp(value) {
-    if (value === null || value === undefined || value === '') return 0;
-    if (typeof value === 'object') return routeEventTimestamp(value?.timestamp ?? value?.time ?? value?.seconds);
-    const text = String(value).trim();
-    if (/^\d+(?:\.\d+)?$/.test(text)) {
-      const n = Number(text);
-      return n > 1e12 ? n : n > 1e9 ? n * 1000 : 0;
-    }
-    const parsed = Date.parse(text);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  function getRouteDay(tracking, assignmentId) {
-    // Variações do rastreio SPX: tracking_list, listas aninhadas e nomes alternativos de data.
-    const allNodes = [];
-    const visited = new WeakSet();
-    function walk(node, depth = 0) {
-      if (!node || typeof node !== 'object' || depth > 14 || visited.has(node)) return;
-      visited.add(node);
-      if (Array.isArray(node)) {
-        for (const child of node) walk(child, depth + 1);
-        return;
-      }
-      allNodes.push(node);
-      for (const child of Object.values(node)) {
-        if (child && typeof child === 'object') walk(child, depth + 1);
-      }
-    }
-    walk(tracking?.data?.tracking_list ?? tracking?.data ?? tracking);
-    const candidates = [];
-    for (const node of allNodes) {
-      const statusText = norm([
-        node.status, node.state, node.event_code, node.event_name,
-        node.title, node.message, node.description, node.status_name
-      ].filter(v => typeof v === 'string' || typeof v === 'number').join(' '));
-      if (!/(^|\b)(em entrega|em processo de entrega|delivering|out for delivery)(\b|$)/.test(statusText)) continue;
-      const timestamp = [
-        node.timestamp, node.ctime, node.event_time, node.create_time,
-        node.time, node.created_at, node.created_time, node.event_timestamp,
-        node.date, node.datetime, node.update_time
-      ].map(routeEventTimestamp).find(v => v > 0) || 0;
-      if (!timestamp) continue;
-      const description = JSON.stringify(node).toUpperCase();
-      candidates.push({ timestamp, sameAT: description.includes(String(assignmentId).toUpperCase()) });
-    }
-    const sameAT = candidates.filter(item => item.sameAT);
-    const selected = sameAT.length ? sameAT : (candidates.length === 1 ? candidates : []);
-    if (!selected.length) return '';
-    // Priorizar o início da rota da AT, nunca o dia em que a consulta foi feita.
-    const timestamp = Math.min(...selected.map(item => item.timestamp));
-    return new Intl.DateTimeFormat('pt-BR', {
-      weekday: 'long', timeZone: 'America/Sao_Paulo'
-    }).format(new Date(timestamp)).toLowerCase();
-  }
-
-  async function fetchRouteDay(assignmentId, shipmentId) {
-    if (!assignmentId || !shipmentId) return;
-    const key = assignmentId + ':' + shipmentId;
-    if (routeDayCache.has(key) || routeDayPending.has(key)) return;
-    routeDayPending.add(key);
-    try {
-      const response = await fetch('/api/fleet_order/order/detail/tracking_info?shipment_id=' + encodeURIComponent(shipmentId), { credentials: 'include', cache: 'no-store' });
-      if (!response.ok) throw new Error('Rastreio indisponível');
-      const data = await response.json();
-      routeDayCache.set(key, getRouteDay(data, assignmentId));
-      if (lastDriverData?.assignmentId === assignmentId && lastTracking === shipmentId && !diagnosticView) {
-        renderDriver(lastDriverData, getStatusScan());
-      }
-    } catch (error) {
-      console.warn('[SPX OnHold] Não foi possível consultar o dia da rota', error);
-    } finally {
-      routeDayPending.delete(key);
-    }
-  }
   function renderDriver(data, scanOverride = null) {
     lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
-    void fetchRouteDay(data.assignmentId, lastTracking);
     if (diagnosticView) return;
 
     const scan = scanOverride || getStatusScan();
@@ -1374,7 +1283,7 @@
       }).join('');
 
     const details = occurrences > 0
-      ? `<div data-onhold-details style="display:${occurrenceListExpanded ? 'block' : 'none'};margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
+      ? `<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
            ${detailsHtml || '<div>Carregando ocorrências...</div>'}
          </div>`
       : '';
@@ -1383,20 +1292,30 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${routeDayCache.get(data.assignmentId + ':' + lastTracking) ? ' <span style="color:#ddd;font-weight:700;margin-left:6px">' + esc(routeDayCache.get(data.assignmentId + ':' + lastTracking)) + '</span>' : ''}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
-       <div data-toggle-onhold role="button" aria-expanded="${occurrenceListExpanded}" style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
+       <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
-         ${occurrences > 0 ? '<span data-occurrence-arrow style="float:right">' + (occurrenceListExpanded ? '▴' : '▾') + '</span>' : ''}
+         ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${routeDayCache.get(data.assignmentId + ':' + lastTracking) || ''}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
     );
 
-
+    const panel = ensurePanel();
+    const toggle = panel.querySelector('[data-toggle-onhold]');
+    const detailsEl = panel.querySelector('[data-onhold-details]');
+    if (toggle && detailsEl) {
+      toggle.addEventListener('click', () => {
+        const open = detailsEl.style.display !== 'none';
+        detailsEl.style.display = open ? 'none' : 'block';
+        const arrow = toggle.querySelector('span');
+        if (arrow) arrow.textContent = open ? '▾' : '▴';
+      });
+    }
   }
 
   function getHeaderInfo(table, wanted) {
@@ -1525,7 +1444,6 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
-    occurrenceListExpanded = false;
     activeSearchUntil = Date.now() + 6000;
     try {
       localStorage.removeItem(DIAG_KEY);
