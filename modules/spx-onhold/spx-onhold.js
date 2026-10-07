@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.11';
+  const MODULE_VERSION = '0.3.12';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1388,7 +1388,7 @@
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold role="button" aria-expanded="${occurrenceListExpanded}" style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
-         ${occurrences > 0 ? '<span data-occurrence-arrow style="float:right">${occurrenceListExpanded ? '▴' : '▾'}</span>' : ''}
+         ${occurrences > 0 ? '<span data-occurrence-arrow style="float:right">' + (occurrenceListExpanded ? '▴' : '▾') + '</span>' : ''}
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
