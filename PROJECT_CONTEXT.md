@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.20
+Versão atual do módulo: 0.3.21
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -130,3 +130,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.20: sem alterar a lógica funcional do dia da rota nem das ocorrências, foi ampliado apenas o diagnóstico. O botão "i" agora mostra uma seção "Fonte Delivering" com endpoint capturado, quantidade de Delivering/OnHold e amostras de status/horário/chaves. "Requisições candidatas" também passa a indicar se cada resposta contém a palavra Delivering. Objetivo: identificar o campo real usado pela SPX antes de novas mudanças na regra.
+
+
+- 0.3.21: diagnóstico refinado após teste real da 0.3.20. O endpoint tracking_info é consultado, mas a resposta não contém a palavra literal Delivering. Foi adicionada a seção Tracking info bruto no botão i, listando campos e valores ligados a status, state, event, message, description, title, horário, data, driver, operador e rota. Objetivo: identificar o campo interno que a SPX usa para montar o rótulo visual Em entrega. Nenhuma alteração feita na seta ou na lógica das ocorrências.
