@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.17
+Versão atual do módulo: 0.3.18
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -121,3 +121,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.17: corrigido o estado da lista de ocorrências para permanecer aberta durante atualizações/re-renderizações do painel. A seta agora reflete o estado persistido e é resetada apenas ao bipar um novo BR. Também ampliada a detecção do status interno `Delivering` para considerar o conteúdo JSON completo do objeto/evento, incluindo casos em que o status fica aninhado em blocos internos. Continua sem usar a data da AT como fallback. Sintaxe validada antes da publicação; teste real no SPX ainda pendente.
+
+
+- 0.3.18: reconstruída a partir da versão estável 0.3.14 para não interferir mais na seta das ocorrências. A lógica da seta/lista foi restaurada exatamente ao comportamento da 0.3.14. O dia real da rota foi separado para uma linha própria ("Dia da rota: ...") e sua consulta não chama mais `renderDriver`, evitando recriar o painel por causa do dia. A detecção usa somente o status interno `Delivering`, procura o motorista atual pelo ID e depois pelo nome, e não usa a data da AT como fallback. Corrigida também a detecção de `Delivering` quando ele vem entre aspas dentro do JSON. Sintaxe validada antes da publicação; teste real no SPX pendente.
