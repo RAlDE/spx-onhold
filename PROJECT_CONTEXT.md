@@ -142,3 +142,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.24: ajuste apenas de exibição do Dia da rota. Mantém a lógica da 0.3.23, remove o traço entre dia e horário e passa a mostrar segundos. Formato atual: `Dia da rota: quarta-feira 15:00:32`. Nenhuma alteração feita na seta, ocorrências ou regra de identificação do último Delivering.
+
+
+- 0.3.24 validada em teste real no SPX em 07/10/2026: o dia da rota e o horário com segundos exibidos pelo módulo bateram com o histórico real do BR. Esta versão passa a ser a referência estável para a lógica de identificação do último Delivering e exibição de `Dia da rota: <dia-da-semana> HH:mm:ss`.
