@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.20';
+  const MODULE_VERSION = '0.3.21';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -107,6 +107,7 @@
   const STATUS_SCAN_KEY = 'spx-onhold-status-scan-v1';
   const ONHOLD_DETAIL_KEY = 'spx-onhold-detail-v1';
   const BR_SCAN_KEY = 'spx-onhold-br-scan-v1';
+  const TRACKING_DIAG_KEY = 'spx-onhold-tracking-diag-v1';
 
   function showDiagnosticToast(message) {
     let toast = document.getElementById('spx-onhold-diagnostic-toast');
@@ -393,7 +394,42 @@
     } catch {}
   }
 
+  function saveTrackingDiagnostic(meta, parsed) {
+    try {
+      const urlText = String(meta.url || '');
+      if (!/tracking_info/i.test(urlText)) return;
+      const hints = [];
+      const walk = (value, path = '', depth = 0) => {
+        if (!value || typeof value !== 'object' || depth > 14 || hints.length >= 120) return;
+        for (const [key, child] of Object.entries(value)) {
+          const nextPath = path ? path + '.' + key : key;
+          if (child && typeof child === 'object') {
+            walk(child, nextPath, depth + 1);
+          } else {
+            const nk = norm(key);
+            const sv = String(child ?? '');
+            if (/status|state|event|message|desc|title|time|date|created|updated|driver|operator|staff/.test(nk) || /entrega|deliver|route|rota/i.test(sv)) {
+              hints.push({ path: nextPath, value: sv.slice(0, 240) });
+            }
+          }
+        }
+      };
+      walk(parsed);
+      localStorage.setItem(TRACKING_DIAG_KEY, JSON.stringify({ capturedAt: new Date().toISOString(), url: urlText, hints }));
+    } catch {}
+  }
+
+  function getTrackingDiagnostic() {
+    try {
+      const raw = localStorage.getItem(TRACKING_DIAG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
   function saveDiagnosticSource(meta, parsed, rawText) {
+    saveTrackingDiagnostic(meta, parsed);
     saveBrScanCandidate(meta, parsed, rawText);
     saveOrderSearchShape(meta, parsed);
     saveDiagnosticCandidate(meta, parsed, rawText);
@@ -795,9 +831,10 @@
     const candidates = getDiagnosticCandidates();
     const brScan = getBrScan();
     const statusScan = getStatusScan();
+    const trackingDiag = getTrackingDiagnostic();
     const map = getStatusMap();
 
-    if (!shape && !diag && !candidates.length && !brScan.length && !statusScan) return false;
+    if (!shape && !diag && !candidates.length && !brScan.length && !statusScan && !trackingDiag) return false;
 
     diagnosticView = true;
     lastRenderSignature = '';
@@ -839,6 +876,19 @@
         <div><b>Status do BR pesquisado:</b> ${esc(statusScan.searchedItemStatusCode || '—')}</div>
         <div><b>Código Return_LMHub_Onhold:</b> ${esc(statusScan.returnOnholdStatusCode || '—')}</div>
         <div style="margin-top:5px">${rows}</div>`;
+    }
+
+    let trackingBody = '<span style="color:#888">Nenhum tracking_info capturado ainda.</span>';
+    if (trackingDiag) {
+      let path = trackingDiag.url || '';
+      try {
+        const u = new URL(path, location.href);
+        path = u.pathname + u.search;
+      } catch {}
+      const rows = (trackingDiag.hints || []).slice(0,80).map(item =>
+        `<div style="padding:3px 0;border-bottom:1px solid #292929"><b>${esc(item.path)}</b>: <span style="color:#ddd;word-break:break-word">${esc(item.value)}</span></div>`
+      ).join('');
+      trackingBody = `<div style="word-break:break-all"><b>Endpoint:</b> ${esc(path || '—')}</div><div style="margin-top:5px">${rows || '<span style="color:#888">Sem campos interessantes.</span>'}</div>`;
     }
 
     let reqBody = '<span style="color:#888">Sem requisições candidatas.</span>';
@@ -885,7 +935,8 @@
       ${accordion('Order Search', orderBody)}
       ${accordion('Mapa de Status', mapBody)}
       ${accordion('Status da AT', statusBody)}
-      ${accordion('Fonte Delivering', deliveringBody, true)}
+      ${accordion('Fonte Delivering', deliveringBody)}
+      ${accordion('Tracking info bruto', trackingBody, true)}
       ${accordion('Varredura do BR', renderBrScanSection())}
       ${accordion('Requisições candidatas', reqBody)}
     `;
@@ -1597,6 +1648,7 @@
       localStorage.removeItem(STATUS_SCAN_KEY);
       localStorage.removeItem(ONHOLD_DETAIL_KEY);
       localStorage.removeItem(BR_SCAN_KEY);
+      localStorage.removeItem(TRACKING_DIAG_KEY);
     } catch {}
     lastRenderSignature = '';
     renderWaiting(value);
