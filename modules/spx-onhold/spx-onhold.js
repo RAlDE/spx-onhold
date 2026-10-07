@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.23';
+  const MODULE_VERSION = '0.3.24';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1420,10 +1420,11 @@
     const time = new Intl.DateTimeFormat('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
       hour12: false,
       timeZone: 'America/Sao_Paulo'
     }).format(date);
-    return weekday + ' — ' + time;
+    return weekday + ' ' + time;
   }
 
   function updateRouteDayLine(key) {
