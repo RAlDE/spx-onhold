@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.15
+Versão atual do módulo: 0.3.16
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -115,3 +115,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.15: substitui o dia derivado da data da AT pelo dia real em que o motorista recebeu a rota. O módulo consulta `tracking_info` do BR pesquisado, procura eventos "Em entrega" / "Pedido em processo de entrega" (ou equivalentes), e prioriza o evento que contém o ID do motorista atual; se necessário, usa o nome do motorista. Somente se houver correspondência segura exibe o dia da semana ao lado da AT. A data da AT não é mais usada como fallback. Mantidos os demais comportamentos estáveis da 0.3.14, inclusive seta de ocorrências. Teste sintático e teste local com dois motoristas/eventos executados com sucesso; validação real no SPX ainda pendente.
+
+
+- 0.3.16: ajuste do critério do dia real da rota. A identificação do momento em que o motorista recebeu a rota agora considera somente o status interno `Delivering`. Removidos os critérios "Em entrega", "Pedido em processo de entrega" e "Out for delivery" da detecção. Continua sendo priorizada a correspondência pelo ID do motorista atual e, em seguida, pelo nome. Não há fallback pela data da AT.
