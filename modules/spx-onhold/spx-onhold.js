@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.21';
+  const MODULE_VERSION = '0.3.22';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1361,20 +1361,46 @@
       node?.created_at, node?.created_time, node?.event_timestamp,
       node?.update_time, node?.time, node?.date, node?.datetime
     ];
+
     for (const value of candidates) {
       const timestamp = routeTimestamp(value);
-      if (timestamp) return timestamp;
+      if (timestamp >= 1577836800 && timestamp <= 4102444800) return timestamp;
     }
+
+    for (const [key, value] of Object.entries(node || {})) {
+      const nk = norm(key);
+      if (!/timestamp|ctime|event.*time|create.*time|created|updated|date|datetime|occurred/.test(nk)) continue;
+      if (value && typeof value === 'object') continue;
+      const timestamp = routeTimestamp(value);
+      if (timestamp >= 1577836800 && timestamp <= 4102444800) return timestamp;
+    }
+
     return 0;
+  }
+
+  function nodeRepresentsDelivering(node) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+
+    for (const [key, value] of Object.entries(node)) {
+      if (value && typeof value === 'object') continue;
+
+      const nk = norm(key);
+      const nv = norm(value);
+
+      // Se o próprio valor trouxer o nome interno, é Delivering.
+      if (nv === 'delivering') return true;
+
+      // Na SPX, status 2 = Delivering. Só aceitamos o 2 em campos de status/state,
+      // para não confundir com outros números existentes no rastreio.
+      if (/status|state/.test(nk) && String(value).trim() === '2') return true;
+    }
+
+    return false;
   }
 
   function realRouteWeekday(tracking) {
     const events = collectRouteObjects(tracking).map((node, index) => {
-      let raw = '';
-      try { raw = JSON.stringify(node); }
-      catch { raw = Object.values(node || {}).map(String).join(' '); }
-
-      if (!/\bDelivering\b/i.test(raw)) return null;
+      if (!nodeRepresentsDelivering(node)) return null;
 
       const timestamp = routeObjectTimestamp(node);
       if (!timestamp) return null;
@@ -1384,7 +1410,7 @@
 
     if (!events.length) return '';
 
-    // O dia da rota é sempre o Delivering mais recente do próprio BR.
+    // O dia da rota é o Delivering mais recente encontrado na varredura do BR.
     const latest = events.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
     return new Intl.DateTimeFormat('pt-BR', {
       weekday: 'long',
