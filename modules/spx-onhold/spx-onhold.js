@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.13';
+  const MODULE_VERSION = '0.3.14';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1242,6 +1242,16 @@
       </div>`;
   }
 
+  function weekdayFromAssignmentId(assignmentId) {
+    const match = String(assignmentId || '').match(/^AT(\d{4})(\d{2})(\d{2})/i);
+    if (!match) return '';
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+    return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(date).toLowerCase();
+  }
   function renderDriver(data, scanOverride = null) {
     lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
@@ -1292,7 +1302,7 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${weekdayFromAssignmentId(data.assignmentId) ? ' — ' + esc(weekdayFromAssignmentId(data.assignmentId)) : ''}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
