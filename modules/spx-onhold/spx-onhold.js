@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.16';
+  const MODULE_VERSION = '0.3.17';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -19,6 +19,7 @@
   let lastDriverData = null;
   let preSearchAssignmentSignature = '';
   let searchStartedAt = 0;
+  let occurrenceListExpanded = false;
   const routeWeekdayCache = new Map();
   const routeWeekdayPending = new Set();
 
@@ -1269,10 +1270,14 @@
   }
 
   function primitiveText(object) {
-    return Object.values(object || {})
-      .filter(value => ['string', 'number', 'boolean'].includes(typeof value))
-      .map(String)
-      .join(' ');
+    try {
+      return JSON.stringify(object);
+    } catch {
+      return Object.values(object || {})
+        .filter(value => ['string', 'number', 'boolean'].includes(typeof value))
+        .map(String)
+        .join(' ');
+    }
   }
 
   function eventTimestamp(object) {
@@ -1394,7 +1399,7 @@
       }).join('');
 
     const details = occurrences > 0
-      ? `<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
+      ? `<div data-onhold-details style="display:${occurrenceListExpanded ? 'block' : 'none'};margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
            ${detailsHtml || '<div>Carregando ocorrências...</div>'}
          </div>`
       : '';
@@ -1408,7 +1413,7 @@
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
-         ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
+         ${occurrences > 0 ? '<span style="float:right">' + (occurrenceListExpanded ? '▴' : '▾') + '</span>' : ''}
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
@@ -1421,10 +1426,10 @@
     const detailsEl = panel.querySelector('[data-onhold-details]');
     if (toggle && detailsEl) {
       toggle.addEventListener('click', () => {
-        const open = detailsEl.style.display !== 'none';
-        detailsEl.style.display = open ? 'none' : 'block';
+        occurrenceListExpanded = !occurrenceListExpanded;
+        detailsEl.style.display = occurrenceListExpanded ? 'block' : 'none';
         const arrow = toggle.querySelector('span');
-        if (arrow) arrow.textContent = open ? '▾' : '▴';
+        if (arrow) arrow.textContent = occurrenceListExpanded ? '▴' : '▾';
       });
     }
   }
@@ -1555,6 +1560,7 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
+    occurrenceListExpanded = false;
     routeWeekdayCache.clear();
     routeWeekdayPending.clear();
     activeSearchUntil = Date.now() + 6000;
