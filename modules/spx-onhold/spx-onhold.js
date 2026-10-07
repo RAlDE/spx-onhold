@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.14';
+  const MODULE_VERSION = '0.3.15';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -19,6 +19,8 @@
   let lastDriverData = null;
   let preSearchAssignmentSignature = '';
   let searchStartedAt = 0;
+  const routeWeekdayCache = new Map();
+  const routeWeekdayPending = new Set();
 
   const isTargetPage = () =>
     location.hash.includes(ROUTE_FRAGMENT) || location.pathname.includes(ROUTE_FRAGMENT);
@@ -1242,19 +1244,120 @@
       </div>`;
   }
 
-  function weekdayFromAssignmentId(assignmentId) {
-    const match = String(assignmentId || '').match(/^AT(\d{4})(\d{2})(\d{2})/i);
-    if (!match) return '';
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
-    return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(date).toLowerCase();
+  function routeEventTimestamp(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'object') {
+      const nested = value?.seconds ?? value?.timestamp ?? value?.time;
+      return routeEventTimestamp(nested);
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+    }
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+  }
+
+  function collectAllTrackingObjects(value, output = [], seen = new WeakSet(), depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 16 || seen.has(value)) return output;
+    seen.add(value);
+    if (!Array.isArray(value)) output.push(value);
+    for (const child of Object.values(value)) {
+      if (child && typeof child === 'object') collectAllTrackingObjects(child, output, seen, depth + 1);
+    }
+    return output;
+  }
+
+  function primitiveText(object) {
+    return Object.values(object || {})
+      .filter(value => ['string', 'number', 'boolean'].includes(typeof value))
+      .map(String)
+      .join(' ');
+  }
+
+  function eventTimestamp(object) {
+    const direct = [
+      object?.timestamp, object?.ctime, object?.event_time, object?.create_time,
+      object?.created_at, object?.created_time, object?.event_timestamp,
+      object?.update_time, object?.time, object?.date, object?.datetime
+    ];
+    for (const candidate of direct) {
+      const timestamp = routeEventTimestamp(candidate);
+      if (timestamp) return timestamp;
+    }
+    for (const value of Object.values(object || {})) {
+      if (typeof value !== 'string') continue;
+      const timestamp = routeEventTimestamp(value);
+      if (timestamp) return timestamp;
+    }
+    return 0;
+  }
+
+  function routeWeekdayFromTracking(tracking, driver) {
+    const driverId = String(driver?.id || '').trim();
+    const driverName = norm(driver?.name || '');
+    const candidates = collectAllTrackingObjects(tracking).map((node, index) => {
+      const text = primitiveText(node);
+      const normalized = norm(text);
+      const isDelivering =
+        /(^|\s)em entrega(\s|$)/.test(normalized) ||
+        normalized.includes('em processo de entrega') ||
+        /(^|\s)delivering(\s|$)/.test(normalized) ||
+        normalized.includes('out for delivery');
+      if (!isDelivering) return null;
+
+      const timestamp = eventTimestamp(node);
+      if (!timestamp) return null;
+
+      const idMatch = driverId ? text.includes('[' + driverId + ']') || text.includes(driverId) : false;
+      const nameMatch = driverName ? normalized.includes(driverName) : false;
+
+      return { timestamp, idMatch, nameMatch, index };
+    }).filter(Boolean);
+
+    if (!candidates.length) return '';
+
+    let selected = candidates.filter(item => item.idMatch);
+    if (!selected.length) selected = candidates.filter(item => item.nameMatch);
+    if (!selected.length && candidates.length === 1) selected = candidates;
+    if (!selected.length) return '';
+
+    const latest = selected.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
+    return new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'long',
+      timeZone: 'America/Sao_Paulo'
+    }).format(new Date(latest.timestamp * 1000)).toLowerCase();
+  }
+
+  async function fetchRouteWeekday(assignmentId, shipmentId, driver) {
+    if (!assignmentId || !shipmentId) return;
+    const key = [assignmentId, shipmentId, driver?.id || '', driver?.name || ''].join('|');
+    if (routeWeekdayCache.has(key) || routeWeekdayPending.has(key)) return;
+
+    routeWeekdayPending.add(key);
+    try {
+      const response = await fetch(
+        '/api/fleet_order/order/detail/tracking_info?shipment_id=' + encodeURIComponent(shipmentId),
+        { credentials: 'include', cache: 'no-store' }
+      );
+      if (!response.ok) return;
+      const tracking = await response.json();
+      routeWeekdayCache.set(key, routeWeekdayFromTracking(tracking, driver));
+
+      if (lastDriverData?.assignmentId === assignmentId && lastTracking === shipmentId && !diagnosticView) {
+        lastRenderSignature = '';
+        renderDriver(lastDriverData, getStatusScan());
+      }
+    } catch (error) {
+      console.warn('[SPX OnHold] Falha ao consultar dia real da rota', error);
+    } finally {
+      routeWeekdayPending.delete(key);
+    }
   }
   function renderDriver(data, scanOverride = null) {
     lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
+    void fetchRouteWeekday(data.assignmentId, lastTracking, data.driver);
     if (diagnosticView) return;
 
     const scan = scanOverride || getStatusScan();
@@ -1270,6 +1373,8 @@
       .filter(item => Number(item?.latestCtime || 0) > 0)
       .sort((a, b) => Number(b.latestCtime) - Number(a.latestCtime))[0] || null;
 
+    const routeKey = [data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|');
+    const routeWeekday = routeWeekdayCache.get(routeKey) || '';
     const occurrenceText = occurrences === null ? '...' : String(occurrences);
     const deliveringText = delivering === null ? '...' : String(delivering);
     const latestText = occurrences === null
@@ -1302,7 +1407,7 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${weekdayFromAssignmentId(data.assignmentId) ? ' — ' + esc(weekdayFromAssignmentId(data.assignmentId)) : ''}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${routeWeekday ? ' — ' + esc(routeWeekday) : ''}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
@@ -1312,7 +1417,7 @@
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${routeWeekday}`
     );
 
     const panel = ensurePanel();
@@ -1454,6 +1559,8 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
+    routeWeekdayCache.clear();
+    routeWeekdayPending.clear();
     activeSearchUntil = Date.now() + 6000;
     try {
       localStorage.removeItem(DIAG_KEY);
