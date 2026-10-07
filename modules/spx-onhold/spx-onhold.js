@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.22';
+  const MODULE_VERSION = '0.3.23';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1412,10 +1412,18 @@
 
     // O dia da rota é o Delivering mais recente encontrado na varredura do BR.
     const latest = events.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
-    return new Intl.DateTimeFormat('pt-BR', {
+    const date = new Date(latest.timestamp * 1000);
+    const weekday = new Intl.DateTimeFormat('pt-BR', {
       weekday: 'long',
       timeZone: 'America/Sao_Paulo'
-    }).format(new Date(latest.timestamp * 1000)).toLowerCase();
+    }).format(date).toLowerCase();
+    const time = new Intl.DateTimeFormat('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'America/Sao_Paulo'
+    }).format(date);
+    return weekday + ' — ' + time;
   }
 
   function updateRouteDayLine(key) {
