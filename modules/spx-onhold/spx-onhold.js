@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.8';
+  const MODULE_VERSION = '0.3.9';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1242,9 +1242,52 @@
       </div>`;
   }
 
+  const routeDayCache = new Map();
+  const routeDayPending = new Set();
+
+  function getRouteDay(tracking, assignmentId) {
+    const events = collectTrackingNodes(tracking?.data?.tracking_list);
+    const matching = events.filter(node => {
+      const status = norm([node?.status, node?.state, node?.event_code, node?.event_name, node?.title].filter(Boolean).join(' '));
+      return /(^|\s)(em entrega|delivering)(\s|$)/.test(status);
+    }).map(node => {
+      const raw = node.timestamp ?? node.ctime ?? node.event_time ?? node.create_time;
+      const timestamp = Number(raw);
+      return {
+        millis: timestamp > 1e12 ? timestamp : timestamp > 1e9 ? timestamp * 1000 : 0,
+        raw: JSON.stringify(node).toUpperCase()
+      };
+    }).filter(entry => entry.millis);
+    const sameAT = matching.filter(entry => entry.raw.includes(String(assignmentId).toUpperCase()));
+    const options = sameAT.length ? sameAT : (matching.length === 1 ? matching : []);
+    if (!options.length) return '';
+    const timestamp = Math.min(...options.map(entry => entry.millis));
+    return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'America/Sao_Paulo' }).format(new Date(timestamp)).toLowerCase();
+  }
+
+  async function fetchRouteDay(assignmentId, shipmentId) {
+    if (!assignmentId || !shipmentId) return;
+    const key = assignmentId + ':' + shipmentId;
+    if (routeDayCache.has(key) || routeDayPending.has(key)) return;
+    routeDayPending.add(key);
+    try {
+      const response = await fetch('/api/fleet_order/order/detail/tracking_info?shipment_id=' + encodeURIComponent(shipmentId), { credentials: 'include', cache: 'no-store' });
+      if (!response.ok) throw new Error('Rastreio indisponível');
+      const data = await response.json();
+      routeDayCache.set(key, getRouteDay(data, assignmentId));
+      if (lastDriverData?.assignmentId === assignmentId && lastTracking === shipmentId && !diagnosticView) {
+        renderDriver(lastDriverData, getStatusScan());
+      }
+    } catch (error) {
+      console.warn('[SPX OnHold] Não foi possível consultar o dia da rota', error);
+    } finally {
+      routeDayPending.delete(key);
+    }
+  }
   function renderDriver(data, scanOverride = null) {
     lastDriverData = data;
     scanAssignmentStatuses(data.assignmentId);
+    void fetchRouteDay(data.assignmentId, lastTracking);
     if (diagnosticView) return;
 
     const scan = scanOverride || getStatusScan();
@@ -1292,7 +1335,7 @@
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
-       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
+       <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${routeDayCache.get(data.assignmentId + ':' + lastTracking) ? ' <span style="color:#ddd;font-weight:700;margin-left:6px">' + esc(routeDayCache.get(data.assignmentId + ':' + lastTracking)) + '</span>' : ''}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
@@ -1302,7 +1345,7 @@
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
        ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${routeDayCache.get(data.assignmentId + ':' + lastTracking) || ''}`
     );
 
     const panel = ensurePanel();
