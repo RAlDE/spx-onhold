@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.12
+Versão atual do módulo: 0.3.13
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -108,3 +108,5 @@ A ideia é permitir depuração sem poluir a interface principal.
 - Evitar toasts de diagnóstico que atrapalhem o operador.
 - Antes de editar, conferir a versão atual em `spx-onhold.js` e `catalog.json` e manter ambos sincronizados.
 - Este arquivo é documentação apenas e não participa da execução da extensão.
+
+- 0.3.13: recuperação emergencial. Restaurado integralmente o módulo estável de 0.3.8, alterando apenas a indicação da versão para 0.3.13. A tentativa de exibir o dia da rota e as mudanças da seta de 0.3.9–0.3.12 foram revertidas. Aguardar confirmação em navegador antes de retomar as melhorias.
