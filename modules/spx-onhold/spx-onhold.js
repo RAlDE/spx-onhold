@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.19';
+  const MODULE_VERSION = '0.3.20';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -843,14 +843,40 @@
 
     let reqBody = '<span style="color:#888">Sem requisições candidatas.</span>';
     if (candidates.length) {
-      reqBody = candidates.slice(0,6).map((item,index) => {
+      reqBody = candidates.slice(0,10).map((item,index) => {
         let path = item.url || '';
         try {
           const u = new URL(path, location.href);
           path = u.pathname + u.search;
         } catch {}
-        return `<div style="padding:4px 0;border-bottom:1px solid #292929"><b>#${index+1} ${esc(item.method)}</b><div style="word-break:break-all">${esc(path)}</div></div>`;
+        return `<div style="padding:4px 0;border-bottom:1px solid #292929">
+          <b>#${index+1} ${esc(item.method)}</b>
+          <div style="word-break:break-all">${esc(path)}</div>
+          <div style="color:#999;margin-top:2px">Delivering: ${item.hasDeliveringWord ? 'sim' : 'não'} · OnHold: ${item.hasOnHoldWord ? 'sim' : 'não'} · ${esc(item.size || 0)} bytes</div>
+        </div>`;
       }).join('');
+    }
+
+    let deliveringBody = '<span style="color:#888">Nenhuma fonte estruturada com Delivering encontrada ainda.</span>';
+    if (diag) {
+      let path = diag.url || '';
+      try {
+        const u = new URL(path, location.href);
+        path = u.pathname + u.search;
+      } catch {}
+      const samples = Array.isArray(diag.sample) ? diag.sample.map((item, index) =>
+        `<div style="padding:4px 0;border-bottom:1px solid #292929">
+          <div><b>#${index + 1} Status:</b> ${esc(item.status || '—')}</div>
+          <div><b>Horário:</b> ${esc(item.timestamp || '—')}</div>
+          <div style="color:#888;word-break:break-word"><b>Chaves:</b> ${esc((item.keys || []).join(', '))}</div>
+        </div>`
+      ).join('') : '';
+
+      deliveringBody = `
+        <div><b>Endpoint:</b> <span style="word-break:break-all">${esc(path || '—')}</span></div>
+        <div><b>Delivering encontrados:</b> ${esc(diag.deliveringInResponse ?? 0)}</div>
+        <div><b>OnHold encontrados:</b> ${esc(diag.onHoldInResponse ?? 0)}</div>
+        <div style="margin-top:5px">${samples || '<span style="color:#888">Sem amostra.</span>'}</div>`;
     }
 
     content.innerHTML = `
@@ -859,6 +885,7 @@
       ${accordion('Order Search', orderBody)}
       ${accordion('Mapa de Status', mapBody)}
       ${accordion('Status da AT', statusBody)}
+      ${accordion('Fonte Delivering', deliveringBody, true)}
       ${accordion('Varredura do BR', renderBrScanSection())}
       ${accordion('Requisições candidatas', reqBody)}
     `;
