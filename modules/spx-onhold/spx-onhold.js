@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.10';
+  const MODULE_VERSION = '0.3.11';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -16,6 +16,7 @@
   let scanLastKeyAt = 0;
   let lastRenderSignature = '';
   let diagnosticView = false;
+  let occurrenceListExpanded = false;
   let lastDriverData = null;
   let preSearchAssignmentSignature = '';
   let searchStartedAt = 0;
@@ -535,7 +536,7 @@
     panel = document.createElement('section');
     panel.id = PANEL_ID;
     panel.style.cssText =
-      'position:fixed;left:16px;top:140px;width:330px;z-index:2147483646;background:#080808;color:#fff;border:1px solid #ff6b00;border-radius:12px;box-shadow:0 10px 35px #0009;overflow:hidden;font-family:Arial,sans-serif';
+      'position:fixed;left:16px;top:140px;width:330px;max-height:calc(100vh - 155px);display:flex;flex-direction:column;z-index:2147483646;background:#080808;color:#fff;border:1px solid #ff6b00;border-radius:12px;box-shadow:0 10px 35px #0009;overflow:hidden;font-family:Arial,sans-serif';
 
     panel.innerHTML = `
       <div data-drag style="background:#ff6b00;color:#111;padding:12px 14px;font-size:19px;font-weight:800;cursor:move;user-select:none;display:flex;justify-content:space-between;align-items:center">
@@ -545,7 +546,7 @@
           <button data-close style="border:0;background:transparent;font-size:21px;font-weight:900;cursor:pointer">−</button>
         </span>
       </div>
-      <div data-content style="padding:15px;font-size:16px;line-height:1.45">
+      <div data-content style="padding:15px;font-size:16px;line-height:1.45;overflow-y:auto;min-height:0;flex:1">
         <b>Sem informação</b>
       </div>`;
 
@@ -575,6 +576,18 @@
       }
     });
 
+    // Listener único no painel: continua funcional após atualizações do conteúdo.
+    panel.addEventListener('click', event => {
+      const toggle = event.target.closest('[data-toggle-onhold]');
+      if (!toggle || !panel.contains(toggle)) return;
+      const details = panel.querySelector('[data-onhold-details]');
+      if (!details) return;
+      occurrenceListExpanded = !occurrenceListExpanded;
+      details.style.display = occurrenceListExpanded ? 'block' : 'none';
+      toggle.setAttribute('aria-expanded', String(occurrenceListExpanded));
+      const arrow = toggle.querySelector('[data-occurrence-arrow]');
+      if (arrow) arrow.textContent = occurrenceListExpanded ? '▴' : '▾';
+    });
     enableDragging(panel, panel.querySelector('[data-drag]'));
     restorePosition(panel);
     return panel;
@@ -1361,7 +1374,7 @@
       }).join('');
 
     const details = occurrences > 0
-      ? `<div data-onhold-details style="display:none;margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
+      ? `<div data-onhold-details style="display:${occurrenceListExpanded ? 'block' : 'none'};margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">
            ${detailsHtml || '<div>Carregando ocorrências...</div>'}
          </div>`
       : '';
@@ -1373,9 +1386,9 @@
        <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}${routeDayCache.get(data.assignmentId + ':' + lastTracking) ? ' <span style="color:#ddd;font-weight:700;margin-left:6px">' + esc(routeDayCache.get(data.assignmentId + ':' + lastTracking)) + '</span>' : ''}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
-       <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
+       <div data-toggle-onhold role="button" aria-expanded="${occurrenceListExpanded}" style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
-         ${occurrences > 0 ? '<span style="float:right">▾</span>' : ''}
+         ${occurrences > 0 ? '<span data-occurrence-arrow style="float:right">${occurrenceListExpanded ? '▴' : '▾'}</span>' : ''}
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
@@ -1383,17 +1396,7 @@
       `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${routeDayCache.get(data.assignmentId + ':' + lastTracking) || ''}`
     );
 
-    const panel = ensurePanel();
-    const toggle = panel.querySelector('[data-toggle-onhold]');
-    const detailsEl = panel.querySelector('[data-onhold-details]');
-    if (toggle && detailsEl) {
-      toggle.addEventListener('click', () => {
-        const open = detailsEl.style.display !== 'none';
-        detailsEl.style.display = open ? 'none' : 'block';
-        const arrow = toggle.querySelector('span');
-        if (arrow) arrow.textContent = open ? '▾' : '▴';
-      });
-    }
+
   }
 
   function getHeaderInfo(table, wanted) {
@@ -1522,6 +1525,7 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
+    occurrenceListExpanded = false;
     activeSearchUntil = Date.now() + 6000;
     try {
       localStorage.removeItem(DIAG_KEY);
