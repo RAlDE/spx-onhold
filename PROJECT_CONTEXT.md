@@ -2,7 +2,7 @@
 
 Atualizado em: 2026-10-06
 Repositório: RAlDE/spx-onhold
-Versão atual do módulo: 0.3.13
+Versão atual do módulo: 0.3.14
 
 ## Objetivo
 Projeto separado do SPX-DV. Extensão Chrome criada para apoiar a consulta de OnHold/Return_LMHub_Onhold dentro da página de assignments da SPX.
@@ -110,3 +110,5 @@ A ideia é permitir depuração sem poluir a interface principal.
 - Este arquivo é documentação apenas e não participa da execução da extensão.
 
 - 0.3.13: recuperação emergencial. Restaurado integralmente o módulo estável de 0.3.8, alterando apenas a indicação da versão para 0.3.13. A tentativa de exibir o dia da rota e as mudanças da seta de 0.3.9–0.3.12 foram revertidas. Aguardar confirmação em navegador antes de retomar as melhorias.
+
+- 0.3.14: a pedido do usuário, usando código estável 0.3.13 como base, apenas acrescentado o dia da semana ao lado da AT, derivado dos 8 dígitos YYYYMMDD após 'AT' (ex.: AT20261006... — terça-feira). Não faz consultas adicionais e preserva a seta de ocorrências. Código validado sintaticamente, e testes de conversão de datas executados; teste no Chrome ainda pendente.
