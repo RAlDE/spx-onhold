@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.18';
+  const MODULE_VERSION = '0.3.19';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1290,10 +1290,7 @@
     return 0;
   }
 
-  function realRouteWeekday(tracking, driver) {
-    const driverId = String(driver?.id || '').trim();
-    const driverName = norm(driver?.name || '');
-
+  function realRouteWeekday(tracking) {
     const events = collectRouteObjects(tracking).map((node, index) => {
       let raw = '';
       try { raw = JSON.stringify(node); }
@@ -1304,23 +1301,17 @@
       const timestamp = routeObjectTimestamp(node);
       if (!timestamp) return null;
 
-      const normalized = norm(raw);
-      const idMatch = driverId ? raw.includes(driverId) : false;
-      const nameMatch = driverName ? normalized.includes(driverName) : false;
-      return { timestamp, idMatch, nameMatch, index };
+      return { timestamp, index };
     }).filter(Boolean);
 
     if (!events.length) return '';
-    let selected = events.filter(item => item.idMatch);
-    if (!selected.length) selected = events.filter(item => item.nameMatch);
-    if (!selected.length && events.length === 1) selected = events;
-    if (!selected.length) return '';
 
-    const event = selected.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
+    // O dia da rota é sempre o Delivering mais recente do próprio BR.
+    const latest = events.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
     return new Intl.DateTimeFormat('pt-BR', {
       weekday: 'long',
       timeZone: 'America/Sao_Paulo'
-    }).format(new Date(event.timestamp * 1000)).toLowerCase();
+    }).format(new Date(latest.timestamp * 1000)).toLowerCase();
   }
 
   function updateRouteDayLine(key) {
@@ -1335,9 +1326,9 @@
     line.textContent = day ? 'Dia da rota: ' + day : 'Dia da rota: não localizado';
   }
 
-  async function fetchRealRouteWeekday(assignmentId, shipmentId, driver) {
-    if (!assignmentId || !shipmentId) return;
-    const key = [assignmentId, shipmentId, driver?.id || '', driver?.name || ''].join('|');
+  async function fetchRealRouteWeekday(shipmentId) {
+    if (!shipmentId) return;
+    const key = shipmentId;
     if (routeWeekdayCache.has(key)) {
       updateRouteDayLine(key);
       return;
@@ -1352,7 +1343,7 @@
       );
       if (!response.ok) throw new Error('Rastreio indisponível');
       const tracking = await response.json();
-      routeWeekdayCache.set(key, realRouteWeekday(tracking, driver));
+      routeWeekdayCache.set(key, realRouteWeekday(tracking));
     } catch (error) {
       routeWeekdayCache.set(key, '');
       console.warn('[SPX OnHold] Falha ao consultar dia real da rota', error);
@@ -1413,7 +1404,7 @@
        <div style="font-size:17px;margin-top:2px"><b>ID:</b> ${esc(data.driver.id || 'Sem informação')}</div>
        <div style="font-size:13px;color:#777;margin-top:4px">${esc(data.assignmentId || '—')}</div>
        <div style="font-size:14px;color:#bbb;margin-top:3px">${esc(lastTracking || '—')}</div>
-       <div data-route-weekday data-route-key="${esc([data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|'))}" style="font-size:13px;color:#ddd;margin-top:4px">Dia da rota: buscando...</div>
+       <div data-route-weekday data-route-key="${esc(lastTracking)}" style="font-size:13px;color:#ddd;margin-top:4px">Dia da rota: buscando...</div>
        <div style="height:1px;background:#333;margin:12px 0"></div>
        <div data-toggle-onhold style="font-size:18px;cursor:${occurrences > 0 ? 'pointer' : 'default'}">
          <b>Ocorrências:</b> ${esc(occurrenceText)}
@@ -1437,8 +1428,8 @@
       });
     }
 
-    const routeKey = [data.assignmentId, lastTracking, data.driver?.id || '', data.driver?.name || ''].join('|');
-    void fetchRealRouteWeekday(data.assignmentId, lastTracking, data.driver);
+    const routeKey = lastTracking;
+    void fetchRealRouteWeekday(lastTracking);
     updateRouteDayLine(routeKey);
   }
 
