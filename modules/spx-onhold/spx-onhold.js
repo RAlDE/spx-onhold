@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.9';
+  const MODULE_VERSION = '0.3.10';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1245,24 +1245,59 @@
   const routeDayCache = new Map();
   const routeDayPending = new Set();
 
+  function routeEventTimestamp(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'object') return routeEventTimestamp(value?.timestamp ?? value?.time ?? value?.seconds);
+    const text = String(value).trim();
+    if (/^\d+(?:\.\d+)?$/.test(text)) {
+      const n = Number(text);
+      return n > 1e12 ? n : n > 1e9 ? n * 1000 : 0;
+    }
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   function getRouteDay(tracking, assignmentId) {
-    const events = collectTrackingNodes(tracking?.data?.tracking_list);
-    const matching = events.filter(node => {
-      const status = norm([node?.status, node?.state, node?.event_code, node?.event_name, node?.title].filter(Boolean).join(' '));
-      return /(^|\s)(em entrega|delivering)(\s|$)/.test(status);
-    }).map(node => {
-      const raw = node.timestamp ?? node.ctime ?? node.event_time ?? node.create_time;
-      const timestamp = Number(raw);
-      return {
-        millis: timestamp > 1e12 ? timestamp : timestamp > 1e9 ? timestamp * 1000 : 0,
-        raw: JSON.stringify(node).toUpperCase()
-      };
-    }).filter(entry => entry.millis);
-    const sameAT = matching.filter(entry => entry.raw.includes(String(assignmentId).toUpperCase()));
-    const options = sameAT.length ? sameAT : (matching.length === 1 ? matching : []);
-    if (!options.length) return '';
-    const timestamp = Math.min(...options.map(entry => entry.millis));
-    return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'America/Sao_Paulo' }).format(new Date(timestamp)).toLowerCase();
+    // Variações do rastreio SPX: tracking_list, listas aninhadas e nomes alternativos de data.
+    const allNodes = [];
+    const visited = new WeakSet();
+    function walk(node, depth = 0) {
+      if (!node || typeof node !== 'object' || depth > 14 || visited.has(node)) return;
+      visited.add(node);
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child, depth + 1);
+        return;
+      }
+      allNodes.push(node);
+      for (const child of Object.values(node)) {
+        if (child && typeof child === 'object') walk(child, depth + 1);
+      }
+    }
+    walk(tracking?.data?.tracking_list ?? tracking?.data ?? tracking);
+    const candidates = [];
+    for (const node of allNodes) {
+      const statusText = norm([
+        node.status, node.state, node.event_code, node.event_name,
+        node.title, node.message, node.description, node.status_name
+      ].filter(v => typeof v === 'string' || typeof v === 'number').join(' '));
+      if (!/(^|\b)(em entrega|em processo de entrega|delivering|out for delivery)(\b|$)/.test(statusText)) continue;
+      const timestamp = [
+        node.timestamp, node.ctime, node.event_time, node.create_time,
+        node.time, node.created_at, node.created_time, node.event_timestamp,
+        node.date, node.datetime, node.update_time
+      ].map(routeEventTimestamp).find(v => v > 0) || 0;
+      if (!timestamp) continue;
+      const description = JSON.stringify(node).toUpperCase();
+      candidates.push({ timestamp, sameAT: description.includes(String(assignmentId).toUpperCase()) });
+    }
+    const sameAT = candidates.filter(item => item.sameAT);
+    const selected = sameAT.length ? sameAT : (candidates.length === 1 ? candidates : []);
+    if (!selected.length) return '';
+    // Priorizar o início da rota da AT, nunca o dia em que a consulta foi feita.
+    const timestamp = Math.min(...selected.map(item => item.timestamp));
+    return new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'long', timeZone: 'America/Sao_Paulo'
+    }).format(new Date(timestamp)).toLowerCase();
   }
 
   async function fetchRouteDay(assignmentId, shipmentId) {
