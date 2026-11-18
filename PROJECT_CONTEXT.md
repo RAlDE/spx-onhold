@@ -148,3 +148,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.25: lista expansível dos BRs em rota (status 2, Delivering) abaixo de Em rota, usando a varredura existente de todas as páginas da AT. Seta independente de ocorrências, preservada durante re-renderizações e reiniciada ao bipar outro BR. Sem chamadas extras, mantendo contagens, ocorrências e dia da rota. Sintaxe validada; teste real no SPX pendente.
+
+
+- 0.3.26: corrige a separação entre OnHold normal, Delivering e Return após análise do SPX-DV (ciclo de retorno próprio) e caso BR2659468678763 em Retorno_LMHub_Retornando. Remove fallback que procurava Return_LMHub_Onhold em todo histórico e reclassificava indiscriminadamente outros BRs da AT. Agora a lista de Ocorrências usa apenas estado atual OnHold (5) normal; Em rota usa estado atual Delivering (2) normal. Return identificado por status 10, order_flow=2 ou marcador explícito de retorno nos campos atuais do pedido fica fora de ambas; estado conflitante no mesmo BR não conta em duas listas. Totais calculados pelo mesmo conjunto de BRs da lista, com deduplicação, diagnóstico de Return excluídos e invalidação do cache antigo. Mantidos dia da rota, seta das ocorrências, seta Em rota, varredura paginada e traduções. Testes sintáticos e 13 casos sintéticos passaram; validação real no SPX ainda pendente. SPX-DV não alterado.
