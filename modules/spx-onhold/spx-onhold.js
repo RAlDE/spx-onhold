@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.25';
+  const MODULE_VERSION = '0.3.26';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -875,7 +875,10 @@
         <div><b>Total API:</b> ${esc(statusScan.total ?? '—')}</div>
         <div><b>Ocorrências computadas:</b> ${esc(statusScan.occurrenceCount ?? '—')}</div>
         <div><b>Status do BR pesquisado:</b> ${esc(statusScan.searchedItemStatusCode || '—')}</div>
-        <div><b>Código Return_LMHub_Onhold:</b> ${esc(statusScan.returnOnholdStatusCode || '—')}</div>
+        <div><b>Em rota válidos:</b> ${esc(statusScan.deliveringCount ?? '—')}</div>
+         <div><b>Return excluídos:</b> ${esc(statusScan.returnExcludedCount ?? '—')}</div>
+         <div><b>BRs ambíguos excluídos:</b> ${esc(statusScan.ambiguousOrders ?? '—')}</div>
+         <div style="color:#888;font-size:11px">Status abaixo: valores brutos da API. Listas: BRs únicos classificados pelo estado atual.</div>
         <div style="margin-top:5px">${rows}</div>`;
     }
 
@@ -1050,7 +1053,7 @@
     if (existing?.assignmentId === assignmentId &&
         Date.now() - Number(existing.savedAt || 0) < 60000 &&
         Array.isArray(existing.items) &&
-        existing.items.length === unique.length) {
+        existing.items.length === unique.length && existing.items.every(item => unique.includes(String(item?.shipmentId || '')))) {
       return existing;
     }
 
@@ -1122,37 +1125,36 @@
     return record;
   }
 
-  function isReturnLmHubOnhold(item) {
-    return objectContainsReturnLmHubOnhold(item);
-  }
+  // Classifica pelo estado ATUAL da AT, não pelos eventos históricos de tracking.
+  function classifyCurrentAssignmentOrder(item) {
+    const status = String(item?.status ?? '').trim().toLowerCase();
+    const flow = item?.order_flow ?? item?.orderFlow ??
+      item?.order_flow_type ?? item?.orderFlowType;
+    // No SPX-DV, order_info.basic_info.order_flow=2 identifica pedido de Return.
+    // O indicador só vale quando fornecido no próprio pedido da AT.
+    if (flow !== null && flow !== undefined && String(flow).trim() === '2') return 'return';
 
-  function objectContainsReturnLmHubOnhold(value) {
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') {
-      return /return[_\s-]*lmhub[_\s-]*onhold/i.test(value)
-        || /retorno[_\s-]*lmhub[_\s-]*em[_\s-]*espera/i.test(value);
+    for (const key of ['is_return', 'isReturn', 'is_return_order', 'isReturnOrder']) {
+      const flag = item?.[key];
+      if (flag === true || flag === 1 || flag === '1' || flag === 'true') return 'return';
     }
-    if (Array.isArray(value)) {
-      return value.some(objectContainsReturnLmHubOnhold);
-    }
-    if (typeof value === 'object') {
-      return Object.values(value).some(objectContainsReturnLmHubOnhold);
-    }
-    return false;
-  }
 
-  async function searchedBrIsReturnOnhold(shipmentId) {
-    if (!shipmentId) return false;
-    try {
-      const url = '/api/fleet_order/order/detail/tracking_info?shipment_id='
-        + encodeURIComponent(shipmentId);
-      const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
-      if (!response.ok) return false;
-      const parsed = await response.json();
-      return objectContainsReturnLmHubOnhold(parsed);
-    } catch {
-      return false;
-    }
+    // Não inspecionar on_hold_reason, tracking_list ou subobjetos com eventos antigos.
+    const currentFields = [
+      'status', 'status_name', 'status_desc', 'status_description',
+      'order_status', 'order_status_name', 'current_status',
+      'current_status_name', 'latest_status', 'flow_name',
+      'flow_type', 'order_type', 'return_status', 'return_status_name'
+    ];
+    if (currentFields.some(key => {
+      const value = item?.[key];
+      return typeof value === 'string' &&
+        /(?:^|[\s_-])(?:return|retorno)(?=[\s_-]|$)|devolu[cç][aã]o/i.test(value);
+    }) || status === '10') return 'return';
+
+    if (status === '5' || status === 'onhold') return 'onhold';
+    if (status === '2' || status === 'delivering') return 'delivering';
+    return 'other';
   }
 
   async function scanAssignmentStatuses(assignmentId) {
@@ -1160,17 +1162,15 @@
 
     try {
       const existing = getStatusScan();
-      if (existing?.assignmentId === assignmentId && Date.now() - existing.savedAt < 60000) return;
+      if (existing?.assignmentId === assignmentId && existing?.classificationVersion === 1 && Date.now() - existing.savedAt < 60000) return;
 
       const count = 24;
       let page = 1;
       let total = 0;
       const byStatus = {};
-      const shipmentsByStatus = {};
-      const onHoldItems = [];
-      const onHoldShipments = [];
-      let occurrenceCount = 0;
-      let searchedItemStatusCode = '';
+      const currentOrders = new Map();
+      let ambiguousOrders = 0;
+            let searchedItemStatusCode = '';
       let safety = 0;
 
       while (safety++ < 50) {
@@ -1198,24 +1198,20 @@
           }
           byStatus[code].count += 1;
 
-          const shipmentId = String(item?.shipment_id || '');
-          if (!shipmentsByStatus[code]) shipmentsByStatus[code] = [];
-          if (shipmentId) shipmentsByStatus[code].push(shipmentId);
+          const shipmentId = String(item?.shipment_id || '').trim().toUpperCase();
+          if (shipmentId && shipmentId === lastTracking) searchedItemStatusCode = code;
+          if (!shipmentId) continue;
 
-          if (shipmentId && shipmentId === lastTracking) {
-            searchedItemStatusCode = code;
-          }
-
-          const countsAsOccurrence = code === '5' || code === '10' || isReturnLmHubOnhold(item);
-          if (countsAsOccurrence) {
-            occurrenceCount += 1;
-            onHoldItems.push({
-              shipment_id: shipmentId,
-              on_hold_reason: item?.on_hold_reason ?? null,
-              return_lmhub_onhold: isReturnLmHubOnhold(item),
-              hints: collectOnHoldTimeHints(item).slice(0, 80)
-            });
-            if (shipmentId) onHoldShipments.push(shipmentId);
+          const category = classifyCurrentAssignmentOrder(item);
+          const previous = currentOrders.get(shipmentId);
+          if (!previous) {
+            currentOrders.set(shipmentId, { category, item });
+          } else if (previous.category === 'return' || category === 'return') {
+            // Um retorno não pode ser contado como ocorrência normal nem Em rota.
+            currentOrders.set(shipmentId, { category: 'return', item });
+          } else if (previous.category !== category) {
+            // Respostas conflitantes para o mesmo BR: não contar duas vezes.
+            currentOrders.set(shipmentId, { category: 'ambiguous', item });
           }
         }
 
@@ -1224,53 +1220,29 @@
         page += 1;
       }
 
-      // Confirma o Return_LMHub_Onhold pelo rastreio individual.
-      // Quando confirmado, aprendemos qual código numérico do Order Search
-      // representa esse status e incluímos TODOS os BRs da AT com o mesmo código.
-      const searchedReturnOnhold = await searchedBrIsReturnOnhold(lastTracking);
-      let returnOnholdStatusCode = '';
-
-      if (searchedItemStatusCode === '10') {
-        returnOnholdStatusCode = '10';
-      }
-
-      if ((searchedReturnOnhold || searchedItemStatusCode === '10') && searchedItemStatusCode) {
-        returnOnholdStatusCode = searchedItemStatusCode;
-
-        const mapped = getStatusMap();
-        if (mapped[returnOnholdStatusCode] !== 'Return_LMHub_Onhold') {
-          mapped[returnOnholdStatusCode] = 'Return_LMHub_Onhold';
-          saveStatusMap(mapped);
-        }
-
-        const returnShipments = shipmentsByStatus[returnOnholdStatusCode] || [];
-
-        for (const shipmentId of returnShipments) {
-          if (!onHoldShipments.includes(shipmentId)) {
-            occurrenceCount += 1;
-            onHoldShipments.push(shipmentId);
-            onHoldItems.push({
-              shipment_id: shipmentId,
-              on_hold_reason: null,
-              return_lmhub_onhold: true,
-              hints: []
-            });
-          }
-        }
-      } else if (searchedReturnOnhold && lastTracking) {
-        // Fallback: mesmo que o código não seja localizado, o BR pesquisado
-        // ainda entra como ocorrência.
-        if (!onHoldShipments.includes(lastTracking)) {
-          occurrenceCount += 1;
-          onHoldShipments.push(lastTracking);
+      const onHoldItems = [];
+      const onHoldShipments = [];
+      const deliveringShipments = [];
+      const returnShipments = [];
+      for (const [shipmentId, entry] of currentOrders) {
+        if (entry.category === 'return') {
+          returnShipments.push(shipmentId);
+        } else if (entry.category === 'onhold') {
+          onHoldShipments.push(shipmentId);
           onHoldItems.push({
-            shipment_id: lastTracking,
-            on_hold_reason: null,
-            return_lmhub_onhold: true,
-            hints: []
+            shipment_id: shipmentId,
+            on_hold_reason: entry.item?.on_hold_reason ?? null,
+            return_lmhub_onhold: false,
+            hints: collectOnHoldTimeHints(entry.item).slice(0, 80)
           });
+        } else if (entry.category === 'delivering') {
+          deliveringShipments.push(shipmentId);
+        } else if (entry.category === 'ambiguous') {
+          ambiguousOrders += 1;
         }
       }
+      const occurrenceCount = onHoldShipments.length;
+      const deliveringCount = deliveringShipments.length;
 
       const record = {
         assignmentId,
@@ -1278,12 +1250,15 @@
         total,
         pagesRead: page,
         byStatus,
-        deliveringShipments: [...new Set(shipmentsByStatus['2'] || [])],
+        classificationVersion: 1,
+        deliveringShipments,
+        deliveringCount,
         onHoldItems,
         occurrenceCount,
-        searchedReturnOnhold,
-        searchedItemStatusCode,
-        returnOnholdStatusCode
+        returnExcludedCount: returnShipments.length,
+        returnExcludedSample: returnShipments.slice(0, 20),
+        ambiguousOrders,
+        searchedItemStatusCode
       };
 
       localStorage.setItem(STATUS_SCAN_KEY, JSON.stringify(record));
@@ -1473,14 +1448,17 @@
     if (diagnosticView) return;
 
     const scan = scanOverride || getStatusScan();
-    const sameAT = scan?.assignmentId === data.assignmentId;
-    const occurrences = sameAT ? Number(scan?.occurrenceCount ?? scan?.byStatus?.['5']?.count ?? 0) : null;
-    const delivering = sameAT ? Number(scan?.byStatus?.['2']?.count || 0) : null;
-    const deliveringShipments = sameAT && Array.isArray(scan?.deliveringShipments) ? scan.deliveringShipments : [];
+    const sameAT = scan?.assignmentId === data.assignmentId && scan?.classificationVersion === 1;
+    const occurrences = sameAT ? Number(scan.occurrenceCount || 0) : null;
+    const delivering = sameAT ? Number(scan.deliveringCount || 0) : null;
+    const deliveringShipments = sameAT && Array.isArray(scan.deliveringShipments) ? scan.deliveringShipments : [];
 
     const detail = getOnHoldDetail();
-    const sameDetailAT = detail?.assignmentId === data.assignmentId;
-    const occurrenceItems = sameDetailAT && Array.isArray(detail?.items) ? detail.items : [];
+    const sameDetailAT = sameAT && detail?.assignmentId === data.assignmentId;
+    const validOnHold = new Set(sameAT ? (scan.onHoldItems || []).map(item => item.shipment_id) : []);
+    const occurrenceItems = sameDetailAT && Array.isArray(detail?.items)
+      ? detail.items.filter(item => validOnHold.has(String(item?.shipmentId || '').trim().toUpperCase()))
+      : [];
 
     const latestItem = [...occurrenceItems]
       .filter(item => Number(item?.latestCtime || 0) > 0)
