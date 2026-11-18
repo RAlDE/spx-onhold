@@ -1180,11 +1180,14 @@
     if (/pedido\s+em\s+devolucao\s+ao\s+vendedor|devolucao\s+em\s+retorno/.test(message)) return 'return_returning';
     if (/pedido\s+em\s+espera\s*:/.test(message)) return 'onhold';
     if (/pedido\s+em\s+devolucao|retorno.*recebid|return.*received|lmhub.*recebid|liquida/.test(message)) return 'other';
-    // Assignment notices alone are not OnHold or Returning states.
-    if (/adicionando\s+pedido\s+a\s+assignment|pedido\s+adicionado\s+a\s+assignment/.test(message)) return '';
+    // Assignment updates supersede an older OnHold, but are not Returning.
+    if (/adicionando\s+pedido\s+a\s+assignment|pedido\s+adicionado\s+a\s+assignment/.test(message)) return 'other';
     if (String(node?.status ?? '').trim() === '2') return 'delivering';
     if (String(node?.status ?? '').trim() === '5') return 'onhold';
     if (String(node?.status ?? '').trim() === '4') return 'other';
+    // A newer numeric event unknown to this module must not leave a prior
+    // OnHold or Returning falsely marked as the current state.
+    if (/^\d+$/.test(String(node?.status ?? '').trim())) return 'other';
     return '';
   }
 
