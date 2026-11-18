@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.27';
+  const MODULE_VERSION = '0.3.28';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1686,12 +1686,22 @@
     for (const table of tables) {
       const headers = [...table.querySelectorAll('thead th')].map(th => norm(th.innerText));
 
+      // A página SPX usa rótulos diferentes em pt-BR e en-US.
+      // Não confundir outros campos contendo "AT" com a coluna da atribuição.
       const atIndex = headers.findIndex(text =>
-        text === 'id da at' || (text.includes('id') && text.includes('at'))
+        text === 'id da at' ||
+        text === 'assignment task id' ||
+        text === 'at id' ||
+        text === 'assignment id' ||
+        (text.includes('assignment task') && text.includes('id'))
       );
 
-      const driverIndex = headers.findIndex(text => text === 'motorista');
-      const actionIndex = headers.findIndex(text => text === 'acao' || text === 'ação');
+      const driverIndex = headers.findIndex(text =>
+        text === 'motorista' || text === 'driver'
+      );
+      const actionIndex = headers.findIndex(text =>
+        text === 'acao' || text === 'ação' || text === 'action'
+      );
 
       if (atIndex < 0 || driverIndex < 0) continue;
 
@@ -1790,7 +1800,11 @@
       let node = input.parentElement;
       for (let i = 0; node && i < 5; i++, node = node.parentElement) {
         const text = norm(node.innerText);
-        if (text.includes('slps num de rastreamento')) return input;
+        if (text.includes('slps num de rastreamento') ||
+            text.includes('spx tracking num') ||
+            text.includes('spx tracking number') ||
+            text.includes('slps tracking num') ||
+            text.includes('tracking number')) return input;
       }
     }
 
