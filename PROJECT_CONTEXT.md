@@ -145,3 +145,6 @@ A ideia é permitir depuração sem poluir a interface principal.
 
 
 - 0.3.24 validada em teste real no SPX em 07/10/2026: o dia da rota e o horário com segundos exibidos pelo módulo bateram com o histórico real do BR. Esta versão passa a ser a referência estável para a lógica de identificação do último Delivering e exibição de `Dia da rota: <dia-da-semana> HH:mm:ss`.
+
+
+- 0.3.25: lista expansível dos BRs em rota (status 2, Delivering) abaixo de Em rota, usando a varredura existente de todas as páginas da AT. Seta independente de ocorrências, preservada durante re-renderizações e reiniciada ao bipar outro BR. Sem chamadas extras, mantendo contagens, ocorrências e dia da rota. Sintaxe validada; teste real no SPX pendente.
