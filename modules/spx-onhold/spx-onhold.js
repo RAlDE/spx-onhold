@@ -7,11 +7,12 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.24';
+  const MODULE_VERSION = '0.3.25';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
   let panelOpen = true;
+  let deliveringListOpen = false;
   let scanBuffer = '';
   let scanLastKeyAt = 0;
   let lastRenderSignature = '';
@@ -1277,6 +1278,7 @@
         total,
         pagesRead: page,
         byStatus,
+        deliveringShipments: [...new Set(shipmentsByStatus['2'] || [])],
         onHoldItems,
         occurrenceCount,
         searchedReturnOnhold,
@@ -1474,6 +1476,7 @@
     const sameAT = scan?.assignmentId === data.assignmentId;
     const occurrences = sameAT ? Number(scan?.occurrenceCount ?? scan?.byStatus?.['5']?.count ?? 0) : null;
     const delivering = sameAT ? Number(scan?.byStatus?.['2']?.count || 0) : null;
+    const deliveringShipments = sameAT && Array.isArray(scan?.deliveringShipments) ? scan.deliveringShipments : [];
 
     const detail = getOnHoldDetail();
     const sameDetailAT = detail?.assignmentId === data.assignmentId;
@@ -1511,6 +1514,21 @@
          </div>`
       : '';
 
+    const deliveringHtml = delivering > 0
+      ? '<div data-toggle-delivering style="font-size:18px;margin-top:10px;cursor:pointer">' +
+          '<b>Em rota:</b> ' + esc(deliveringText) +
+          '<span style="float:right">' + (deliveringListOpen ? '▴' : '▾') + '</span>' +
+        '</div>' +
+        '<div data-delivering-details style="display:' + (deliveringListOpen ? 'block' : 'none') +
+          ';margin-top:8px;padding:8px;background:#151515;border-radius:7px;font-size:12px;color:#ddd;max-height:260px;overflow:auto">' +
+          (deliveringShipments.length
+            ? deliveringShipments.map(shipmentId =>
+                '<div style="padding:7px 0;border-bottom:1px solid #2b2b2b;font-weight:800">' + esc(shipmentId) + '</div>'
+              ).join('')
+            : '<div>BRs não disponíveis na resposta da AT.</div>') +
+        '</div>'
+      : '';
+
     setContent(
       `<div style="font-size:13px;color:#aaa;font-weight:700">MOTORISTA</div>
        <div style="font-size:19px;font-weight:800;margin-top:2px">${esc(data.driver.name)}</div>
@@ -1525,8 +1543,8 @@
        </div>
        <div style="font-size:15px;color:#aaa;margin-top:5px"><b>Último OnHold:</b> ${esc(latestText)}</div>
        ${details}
-       ${delivering > 0 ? `<div style="font-size:18px;margin-top:10px"><b>Em rota:</b> ${esc(deliveringText)}</div>` : ''}`,
-      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}`
+       ${deliveringHtml}`,
+      `driver:${data.assignmentId}:${data.driver.id}:${data.driver.name}:${lastTracking}:${occurrenceText}:${deliveringText}:${latestText}:${occurrenceItems.length}:${deliveringShipments.join('|')}`
     );
 
     const panel = ensurePanel();
@@ -1538,6 +1556,17 @@
         detailsEl.style.display = open ? 'none' : 'block';
         const arrow = toggle.querySelector('span');
         if (arrow) arrow.textContent = open ? '▾' : '▴';
+      });
+    }
+
+    const deliveringToggle = panel.querySelector('[data-toggle-delivering]');
+    const deliveringDetailsEl = panel.querySelector('[data-delivering-details]');
+    if (deliveringToggle && deliveringDetailsEl) {
+      deliveringToggle.addEventListener('click', () => {
+        deliveringListOpen = !deliveringListOpen;
+        deliveringDetailsEl.style.display = deliveringListOpen ? 'block' : 'none';
+        const arrow = deliveringToggle.querySelector('span');
+        if (arrow) arrow.textContent = deliveringListOpen ? '▴' : '▾';
       });
     }
 
@@ -1672,6 +1701,7 @@
     searchStartedAt = Date.now();
 
     lastTracking = value;
+    deliveringListOpen = false;
     routeWeekdayCache.clear();
     routeWeekdayPending.clear();
     activeSearchUntil = Date.now() + 6000;
