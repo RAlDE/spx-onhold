@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.28';
+  const MODULE_VERSION = '0.3.29';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1174,10 +1174,18 @@
       const category = statusCategory(node[key]);
       if (category) return category;
     }
+    // Os códigos abaixo foram confirmados no rastreio do Return.
+    // O texto de message é localizado; a classificação não pode depender
+    // da tradução (pt-BR vs en-US) para esses eventos.
+    const trackingStatus = String(node?.status ?? '').trim();
+    if (trackingStatus === '124') return 'return_returning';
+    if (trackingStatus === '126') return 'return_onhold';
+    if (trackingStatus === '119' || trackingStatus === '120' || trackingStatus === '125') return 'other';
+
     const message = norm([node?.message, node?.description, node?.title, node?.remark]
       .filter(Boolean).join(' '));
     if (/devolucao\s+em\s+espera\s*:/.test(message)) return 'return_onhold';
-    if (/pedido\s+em\s+devolucao\s+ao\s+vendedor|devolucao\s+em\s+retorno/.test(message)) return 'return_returning';
+    if (/pedido\s+em\s+devolucao\s+ao\s+vendedor|devolucao\s+em\s+retorno|parcel\s+returning\s+to\s+seller/.test(message)) return 'return_returning';
     if (/pedido\s+em\s+espera\s*:/.test(message)) return 'onhold';
     if (/pedido\s+em\s+devolucao|retorno.*recebid|return.*received|lmhub.*recebid|liquida/.test(message)) return 'other';
     // Assignment updates supersede an older OnHold, but are not Returning.
@@ -1441,6 +1449,10 @@
   function nodeRepresentsDelivering(node) {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
 
+    // O Dia da rota também considera a saída de Return (status 124).
+    // A classificação é insensível ao idioma e não inclui OnHold ou devolvido.
+    if (trackingNodeCategory(node) === 'return_returning') return true;
+
     for (const [key, value] of Object.entries(node)) {
       if (value && typeof value === 'object') continue;
 
@@ -1470,7 +1482,7 @@
 
     if (!events.length) return '';
 
-    // O dia da rota é o Delivering mais recente encontrado na varredura do BR.
+    // Dia da rota: último início de rota normal (2) ou Return (124).
     const latest = events.sort((a, b) => b.timestamp - a.timestamp || b.index - a.index)[0];
     const date = new Date(latest.timestamp * 1000);
     const weekday = new Intl.DateTimeFormat('pt-BR', {
