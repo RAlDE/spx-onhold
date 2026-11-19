@@ -61,3 +61,15 @@ Os exemplos foram executados contra **as funções reais extraídas do arquivo d
 - **18/11/2026:** inspeção do OnHold v0.3.28 e testes locais de status `124` PT vs EN e do Dia da rota. Falha real no parser local identificada; causa técnica e plano documentados. Código operacional intacto. Próximo registro deve trazer correção proposta/efetivada, testes e validação do operador, com commit correspondente.
 
 - **18/11/2026 — 0.3.29:** publicado ajuste pontual no classificador de `tracking_info` para códigos Return `124` (em rota), `126` (em espera), `119/120` (atribuição) e `125` (concluído), com reconhecimento textual complementar de `Parcel returning to seller`. `Dia da rota` passa a considerar o evento Return `124` além do `Delivering 2`. Testes locais: 25/25; compilação JS passou. **Não testado no SPX real ainda.** AT da tabela inalterada; o rastreio pt-BR ainda não inclui AT na mensagem, portanto nenhuma captura histórica automática foi adicionada. Nenhum cookie, Dashboard, SPX-DV, API externa ou permissão mudou.
+
+
+## Teste controlado dos cookies de idioma — Teste A
+
+**Data da captura:** 18/11/2026, sessão do usuário. **Origem:** print do Console Chrome e configuração explicitada pelo usuário. **Somente documentação — extensão intocada.**
+
+- Contexto: mesma página de rastreio `BR2659468678763` com interface ainda em português; chamadas `GET /api/fleet_order/order/detail/tracking_info?shipment_id=BR2659468678763` via `fetch` autenticado no Console.
+- **Teste A:** `spx-admin-lang=en` e `spx-lang=pt-BR` (conforme o usuário). Resultado mais recente mostrado na **tabela inferior** do Console: `HTTP 200`, eventos `119` e `120` com mensagens **em português**, e AT `Não encontrada` para ambos.
+- A **tabela superior**, ainda visível no mesmo Console, preservava o resultado do teste anterior com ambos os cookies `en`, que gerou mensagens inglesas e `AT20261118D0T4N`. Não confundir a tabela superior com o resultado do Teste A.
+- **Conclusão limitada:** `spx-admin-lang=en` isoladamente, mantendo `spx-lang=pt-BR`, **não foi suficiente** para obter a AT no texto. Isso aumenta a plausibilidade de `spx-lang` ser determinante, mas **não comprova** o efeito dele sozinho e não elimina influência de outras condições da sessão.
+- **Teste B ainda pendente:** com a página aberta em português, verificar `spx-admin-lang=pt-br` e `spx-lang=en`, executar a mesma consulta GET e registrar apenas HTTP, idioma e AT dos eventos 119/120. Não publicar cabeçalhos completos ou tokens.
+- Restaurar ao fim `spx-admin-lang=pt-br` e `spx-lang=pt-BR`. Esse teste **não implementa** troca de idioma na extensão; qualquer eventual solução deve isolar requisições e evitar interferência na sessão.
