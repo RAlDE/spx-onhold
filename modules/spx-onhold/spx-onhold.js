@@ -7,7 +7,7 @@
   const TOGGLE_ID = 'spx-onhold-toggle';
   const POSITION_KEY = 'spx-onhold-position-v1';
   const ROUTE_FRAGMENT = '/delivery-assignment/list';
-  const MODULE_VERSION = '0.3.29';
+  const MODULE_VERSION = '0.3.30';
 
   let lastTracking = '';
   let activeSearchUntil = 0;
@@ -1624,23 +1624,25 @@
     const toggle = panel.querySelector('[data-toggle-onhold]');
     const detailsEl = panel.querySelector('[data-onhold-details]');
     if (toggle && detailsEl) {
-      toggle.addEventListener('click', () => {
+      // Re-renderizar o mesmo conteúdo não deve acumular handlers no mesmo DOM.
+      toggle.onclick = () => {
         const open = detailsEl.style.display !== 'none';
         detailsEl.style.display = open ? 'none' : 'block';
         const arrow = toggle.querySelector('span');
         if (arrow) arrow.textContent = open ? '▾' : '▴';
-      });
+      };
     }
 
     const deliveringToggle = panel.querySelector('[data-toggle-delivering]');
     const deliveringDetailsEl = panel.querySelector('[data-delivering-details]');
     if (deliveringToggle && deliveringDetailsEl) {
-      deliveringToggle.addEventListener('click', () => {
+      // Atribuição idempotente: um clique, uma abertura/fechamento.
+      deliveringToggle.onclick = () => {
         deliveringListOpen = !deliveringListOpen;
         deliveringDetailsEl.style.display = deliveringListOpen ? 'block' : 'none';
         const arrow = deliveringToggle.querySelector('span');
         if (arrow) arrow.textContent = deliveringListOpen ? '▴' : '▾';
-      });
+      };
     }
 
     const routeKey = lastTracking;
