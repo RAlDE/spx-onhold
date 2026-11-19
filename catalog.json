@@ -6,7 +6,7 @@
     {
       "id": "spx-onhold",
       "name": "SPX OnHold",
-      "version": "0.3.28",
+      "version": "0.3.29",
       "enabled": true,
       "matches": ["https://spx.shopee.com.br/*"],
       "scripts": [
