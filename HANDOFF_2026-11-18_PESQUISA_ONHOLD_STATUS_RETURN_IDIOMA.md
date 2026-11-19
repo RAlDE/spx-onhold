@@ -71,5 +71,27 @@ Os exemplos foram executados contra **as funções reais extraídas do arquivo d
 - **Teste A:** `spx-admin-lang=en` e `spx-lang=pt-BR` (conforme o usuário). Resultado mais recente mostrado na **tabela inferior** do Console: `HTTP 200`, eventos `119` e `120` com mensagens **em português**, e AT `Não encontrada` para ambos.
 - A **tabela superior**, ainda visível no mesmo Console, preservava o resultado do teste anterior com ambos os cookies `en`, que gerou mensagens inglesas e `AT20261118D0T4N`. Não confundir a tabela superior com o resultado do Teste A.
 - **Conclusão limitada:** `spx-admin-lang=en` isoladamente, mantendo `spx-lang=pt-BR`, **não foi suficiente** para obter a AT no texto. Isso aumenta a plausibilidade de `spx-lang` ser determinante, mas **não comprova** o efeito dele sozinho e não elimina influência de outras condições da sessão.
-- **Teste B ainda pendente:** com a página aberta em português, verificar `spx-admin-lang=pt-br` e `spx-lang=en`, executar a mesma consulta GET e registrar apenas HTTP, idioma e AT dos eventos 119/120. Não publicar cabeçalhos completos ou tokens.
+- **Teste B realizado e registrado:** ver seção seguinte. Não publicar cabeçalhos completos ou tokens.
 - Restaurar ao fim `spx-admin-lang=pt-br` e `spx-lang=pt-BR`. Esse teste **não implementa** troca de idioma na extensão; qualquer eventual solução deve isolar requisições e evitar interferência na sessão.
+
+## Teste controlado dos cookies de idioma — Teste B
+
+**Data:** 18/11/2026, comprovante visual da execução no Console enviado pelo usuário. **BR:** `BR2659468678763`.
+
+- **Configuração informada pelo usuário para o Teste B:** `spx-admin-lang=pt-br`; `spx-lang=en`.
+- A interface aberta continuou exibindo **Português**.
+- A consulta `GET /api/fleet_order/order/detail/tracking_info?shipment_id=BR2659468678763`, executada novamente com `fetch` da própria página, retornou **HTTP 200**.
+- A **tabela inferior (resultado novo)** mostrou mensagens em inglês para o status `119` (`Parcel adding into Assignment Task AT20261118D0T4N`) e `120` (`Parcel added into Assignment Task AT20261118D0T4N`), ambas com a AT **`AT20261118D0T4N`** na coluna extraída.
+- A **tabela superior** no print era resultado anterior do Teste A (`spx-admin-lang=en`, `spx-lang=pt-BR`), com mensagens em português e AT `Não encontrada`. Não confundir ambas.
+
+| Teste | `spx-admin-lang` | `spx-lang` | Idioma do `message` | AT |
+|---|---|---|---|---|
+| Ambos en (teste anterior) | `en` | `en` | inglês | `AT20261118D0T4N` |
+| **A** | `en` | `pt-BR` | português | ausente |
+| **B** | `pt-br` | `en` | inglês | `AT20261118D0T4N` |
+
+**Conclusão experimental:** na sessão e no endpoint testados, o valor `spx-lang=en` foi **suficiente** para obter o texto inglês com a AT, mesmo mantendo `spx-admin-lang=pt-br`; ao contrário, `spx-admin-lang=en` com `spx-lang=pt-BR` não bastou. Essa comparação fornece forte evidência de que **`spx-lang` determina a localização do texto de `tracking_info`** neste fluxo.
+
+**Limites / próximos passos:** o teste não identifica o algoritmo interno, nem garante comportamento de outros endpoints. Principalmente **não** demonstra que a extensão possa pedir idioma inglês em uma chamada isolada sem modificar cookies globais da sessão. `fetch` no navegador não aceita definir manualmente o header `Cookie`; não adotar rotação automática de cookies como solução de produção. Considerar endpoints estruturados BR/VT/AT, ou outro mecanismo autorizado e comprovado de seleção de idioma por requisição. Preservar no OnHold a AT da tabela de assignment como fonte da AT atualmente selecionada e não atribuir uma AT histórica do rastreio ao motorista errado.
+
+**Segurança e restauração:** após testar, restaurar `spx-admin-lang=pt-br` e `spx-lang=pt-BR`. Não coletar, armazenar nem publicar cookies de autenticação ou tokens. **Código OnHold 0.3.29 e SPX-DV não modificados por este registro.**
