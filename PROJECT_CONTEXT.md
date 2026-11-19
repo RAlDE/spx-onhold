@@ -1,3 +1,5 @@
+> **CONTEXTO COMPARTILHADO — AT de Return no rastreio por idioma (18/11/2026):** ver o handoff autoritativo do SPX-DV em [RAlDE/spx-dv/HANDOFF_2026-11-18_AT_RETURN_IDIOMA_PT_EN.md](https://github.com/RAlDE/spx-dv/blob/main/HANDOFF_2026-11-18_AT_RETURN_IDIOMA_PT_EN.md). No mesmo BR, `tracking_info` em inglês revela a AT nos eventos 119/120 e em português omite; `Accept-Language` isolado falhou; cookies `spx-admin-lang`/`spx-lang` mudam por idioma, mas ainda não foi provado que controlam a API. O SPX OnHold v0.3.28 foi **validado pelo usuário em inglês no SPX real**, sem alteração de código nesta documentação. Não misturar os projetos nem usar AT de outro ciclo.
+
 # PROJECT_CONTEXT — SPX OnHold
 
 Atualizado em: 2026-10-06
