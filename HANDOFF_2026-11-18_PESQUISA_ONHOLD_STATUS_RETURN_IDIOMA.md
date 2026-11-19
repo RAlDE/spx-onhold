@@ -59,3 +59,5 @@ Os exemplos foram executados contra **as funções reais extraídas do arquivo d
 ## Registro incremental
 
 - **18/11/2026:** inspeção do OnHold v0.3.28 e testes locais de status `124` PT vs EN e do Dia da rota. Falha real no parser local identificada; causa técnica e plano documentados. Código operacional intacto. Próximo registro deve trazer correção proposta/efetivada, testes e validação do operador, com commit correspondente.
+
+- **18/11/2026 — 0.3.29:** publicado ajuste pontual no classificador de `tracking_info` para códigos Return `124` (em rota), `126` (em espera), `119/120` (atribuição) e `125` (concluído), com reconhecimento textual complementar de `Parcel returning to seller`. `Dia da rota` passa a considerar o evento Return `124` além do `Delivering 2`. Testes locais: 25/25; compilação JS passou. **Não testado no SPX real ainda.** AT da tabela inalterada; o rastreio pt-BR ainda não inclui AT na mensagem, portanto nenhuma captura histórica automática foi adicionada. Nenhum cookie, Dashboard, SPX-DV, API externa ou permissão mudou.
