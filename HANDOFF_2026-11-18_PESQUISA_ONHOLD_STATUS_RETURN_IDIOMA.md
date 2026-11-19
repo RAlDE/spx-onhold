@@ -95,3 +95,16 @@ Os exemplos foram executados contra **as funções reais extraídas do arquivo d
 **Limites / próximos passos:** o teste não identifica o algoritmo interno, nem garante comportamento de outros endpoints. Principalmente **não** demonstra que a extensão possa pedir idioma inglês em uma chamada isolada sem modificar cookies globais da sessão. `fetch` no navegador não aceita definir manualmente o header `Cookie`; não adotar rotação automática de cookies como solução de produção. Considerar endpoints estruturados BR/VT/AT, ou outro mecanismo autorizado e comprovado de seleção de idioma por requisição. Preservar no OnHold a AT da tabela de assignment como fonte da AT atualmente selecionada e não atribuir uma AT histórica do rastreio ao motorista errado.
 
 **Segurança e restauração:** após testar, restaurar `spx-admin-lang=pt-br` e `spx-lang=pt-BR`. Não coletar, armazenar nem publicar cookies de autenticação ou tokens. **Código OnHold 0.3.29 e SPX-DV não modificados por este registro.**
+
+
+## 19/11/2026 — incidente da lista Em rota quando não existem ocorrências
+
+**Evidência do usuário:** imagem na página `#/delivery-assignment/list` com `AT20261119D3AQ0`, BR pesquisado `BR2686521491804`, `Ocorrências: 0` e `Em rota: 2`, porém a expansão da lista não apresentava os BRs. Segunda imagem: `AT20261119D3ADB`, `Ocorrências: 5` e `Em rota: 1`, com as duas listas expandidas e BRs visíveis.
+
+**Causa confirmada por análise e reprodução local:** `renderDriver()` é executado novamente após varreduras/atualizações; `setContent(html, signature)` **não** troca o DOM quando a assinatura é igual, mas os listeners eram registrados novamente em `addEventListener('click', ...)`. Duas chamadas com mesmo conteúdo geravam dois handlers no mesmo botão, que abriam e fechavam a lista no único clique do usuário. O caso sem ocorrências favorecia assinaturas iguais, pois não havia detalhes de OnHold mudando.
+
+**Fix publicado em v0.3.30:** manter as listas atuais, setas, dados, HTML, ordenações e contagens; trocar somente a associação de evento dos botões `[data-toggle-onhold]` e `[data-toggle-delivering]` para `element.onclick = ...`. Cada renderização substitui o próprio manipulador em vez de acumulá-lo. Nenhuma alteração no cálculo do Return, API, AT, cookies, SPX-DV ou permissões.
+
+**Validação local:** JavaScript analisado com `new Function`; 9 cenários/asserções passaram com a função `renderDriver()` real extraída do módulo, simulando DOM com mesma assinatura: sem ocorrências e com duas rotas; com 5 ocorrências e uma rota; cliques abrindo e fechando uma vez; rerender sem perder abertura; listas independentes; zero rotas sem lista fictícia. Antes do patch, o mesmo modelo reproduziu 2 listeners e a lista permanecia fechada após um clique.
+
+**Pendente:** teste visual real do usuário com v0.3.30 na AT com apenas BRs em rota e `Ocorrências: 0`. Registrar a confirmação antes de chamar a correção validada em produção.
