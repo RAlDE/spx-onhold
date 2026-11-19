@@ -107,4 +107,4 @@ Os exemplos foram executados contra **as funções reais extraídas do arquivo d
 
 **Validação local:** JavaScript analisado com `new Function`; 9 cenários/asserções passaram com a função `renderDriver()` real extraída do módulo, simulando DOM com mesma assinatura: sem ocorrências e com duas rotas; com 5 ocorrências e uma rota; cliques abrindo e fechando uma vez; rerender sem perder abertura; listas independentes; zero rotas sem lista fictícia. Antes do patch, o mesmo modelo reproduziu 2 listeners e a lista permanecia fechada após um clique.
 
-**Pendente:** teste visual real do usuário com v0.3.30 na AT com apenas BRs em rota e `Ocorrências: 0`. Registrar a confirmação antes de chamar a correção validada em produção.
+**VALIDAÇÃO REAL CONCLUÍDA em 19/11/2026:** após receber a v0.3.30 e testar no SPX, o usuário confirmou **“deu certo jogador”**. O teste valida a abertura dos BRs em `Em rota` mesmo quando `Ocorrências: 0`. Não equivale a confirmação de todos os estados Return ou da AT histórica. Sem alteração de código.
